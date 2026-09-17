@@ -1,0 +1,758 @@
+/* =========================================================================
+   Photobooth operator console.
+
+   The aesthetic is a precision instrument, not a SaaS dashboard: a fixed rail
+   of controls, a readout that can be understood from across a room, monospace
+   for every machine-generated value, and one accent colour used sparingly so
+   that status colours still mean something.
+
+   Fonts are self-hosted (see main.tsx). A booth at a venue with no internet
+   would otherwise fall back to system fonts mid-event.
+   ========================================================================= */
+
+/* ---------- tokens ---------- */
+
+:root {
+  --font: 'Manrope Variable', 'Manrope', system-ui, sans-serif;
+  --mono: 'JetBrains Mono Variable', 'JetBrains Mono', Consolas, ui-monospace, monospace;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --rail: 268px;
+
+  /* Light: warm paper, for setting the booth up in daylight. */
+  --bg: #f7f7f5;
+  --bg-rail: #ffffff;
+  --surface: #ffffff;
+  --surface-sunk: #f1f1ee;
+  --line: #e2e2dd;
+  --line-strong: #cfcfc8;
+
+  --ink: #16181c;
+  --ink-soft: #5c6068;
+  --ink-faint: #8b9099;
+
+  --accent: #1f6feb;
+  --accent-ink: #ffffff;
+  --accent-wash: #e8f0fe;
+
+  --ok: #1a7f47;
+  --warn: #9a6300;
+  --bad: #b3261e;
+  --ok-wash: #e6f4ec;
+  --warn-wash: #fdf3e0;
+  --bad-wash: #fdeceb;
+
+  --shadow: 0 1px 2px rgba(16, 18, 22, .06), 0 8px 24px rgba(16, 18, 22, .06);
+}
+
+:root[data-theme='dark'] {
+  /* Dark: what the booth actually runs in. */
+  --bg: #0e1013;
+  --bg-rail: #14171c;
+  --surface: #171b21;
+  --surface-sunk: #11141a;
+  --line: #262b33;
+  --line-strong: #333a45;
+
+  --ink: #e8eaed;
+  --ink-soft: #a2a9b4;
+  --ink-faint: #6e7683;
+
+  --accent: #62a0ff;
+  --accent-ink: #0b1220;
+  --accent-wash: #17243c;
+
+  --ok: #5fd08a;
+  --warn: #e2b04a;
+  --bad: #ff8b80;
+  --ok-wash: #14261c;
+  --warn-wash: #2a2214;
+  --bad-wash: #2c1917;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px rgba(0, 0, 0, .38);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+code, .path, kbd { font-family: var(--mono); font-size: .92em; }
+.muted { color: var(--ink-soft); }
+.small { font-size: 12px; }
+.good { color: var(--ok); }
+.bad { color: var(--bad); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------- shell ---------- */
+
+.shell { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 100vh; }
+
+.rail {
+  position: sticky; top: 0; align-self: start;
+  height: 100vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 18px;
+  padding: 20px 18px;
+  background: var(--bg-rail);
+  border-right: 1px solid var(--line);
+}
+
+.rail__brand { display: flex; align-items: center; gap: 10px; }
+.rail__mark {
+  width: 22px; height: 22px; border-radius: 5px;
+  background: var(--ink);
+  /* Three bars: the strip this whole application exists to produce. */
+  -webkit-mask: repeating-linear-gradient(#000 0 4px, transparent 4px 7px);
+  mask: repeating-linear-gradient(#000 0 4px, transparent 4px 7px);
+}
+.rail__name { font-weight: 800; letter-spacing: -.02em; font-size: 15px; }
+
+.rail__status {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--surface-sunk); border: 1px solid var(--line);
+  font-size: 12.5px; font-weight: 500; color: var(--ink-soft);
+}
+.rail__status .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint);
+  flex: none;
+}
+.rail__status--Ready { color: var(--ok); background: var(--ok-wash); border-color: transparent; }
+.rail__status--Ready .dot { background: var(--ok); }
+.rail__status--Faulted,
+.rail__status--Offline,
+.rail__status--Disconnected { color: var(--bad); background: var(--bad-wash); border-color: transparent; }
+.rail__status--Faulted .dot,
+.rail__status--Offline .dot,
+.rail__status--Disconnected .dot { background: var(--bad); }
+
+.rail__nav { display: flex; flex-direction: column; gap: 2px; }
+.navitem {
+  display: block; padding: 8px 10px; border-radius: var(--radius-sm);
+  color: var(--ink); text-decoration: none; border: 1px solid transparent;
+}
+.navitem:hover { background: var(--surface-sunk); text-decoration: none; }
+.navitem__label { display: block; font-weight: 600; font-size: 13.5px; }
+.navitem__hint { display: block; font-size: 11.5px; color: var(--ink-faint); }
+.navitem--on {
+  background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.navitem--on .navitem__label { color: var(--accent); }
+
+.rail__panel { display: flex; flex-direction: column; gap: 18px; }
+.railsection { display: flex; flex-direction: column; gap: 8px; }
+.railsection h2 {
+  margin: 0; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--ink-faint);
+}
+
+.rail__foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+.rail__meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; color: var(--ink-faint);
+}
+
+.themeswitch {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+  padding: 3px; border-radius: var(--radius-sm);
+  background: var(--surface-sunk); border: 1px solid var(--line);
+}
+.themeswitch button {
+  border: 0; background: none; color: var(--ink-faint);
+  padding: 5px 0; border-radius: 4px; cursor: pointer; font-size: 13px;
+}
+.themeswitch button:hover { color: var(--ink); }
+.themeswitch__on {
+  background: var(--surface); color: var(--ink) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+}
+
+.work {
+  padding: 26px 30px 60px;
+  display: flex; flex-direction: column; gap: 18px;
+  max-width: 1180px;
+}
+
+/* ---------- panels ---------- */
+
+.panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 16px 18px;
+}
+.panel__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+}
+.panel__head h2 {
+  margin: 0; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--ink-faint);
+}
+
+.notice {
+  margin: 0; padding: 10px 14px; border-radius: var(--radius-sm);
+  background: var(--accent-wash); color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.notice--warn { background: var(--warn-wash); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+
+/* ---------- the readout ---------- */
+
+.stagecard {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap;
+  padding: 26px 28px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  /* A hairline of state colour, rather than tinting the whole card. */
+  border-left: 3px solid var(--ink-faint);
+}
+.stagecard--Countdown, .stagecard--Collecting { border-left-color: var(--accent); }
+.stagecard--ReviewShots, .stagecard--Done { border-left-color: var(--ok); }
+.stagecard--TimedOut { border-left-color: var(--bad); }
+.stagecard--Composing, .stagecard--Uploading { border-left-color: var(--warn); }
+
+.stagecard__state {
+  margin: 0 0 4px; font-family: var(--mono); font-size: 11px;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint);
+}
+.stagecard__headline {
+  margin: 0; font-size: 30px; line-height: 1.15;
+  font-weight: 800; letter-spacing: -.025em;
+}
+.stagecard__metric { text-align: right; }
+.metric {
+  display: block; font-family: var(--mono); font-size: 46px; line-height: 1;
+  font-weight: 700; letter-spacing: -.04em; font-variant-numeric: tabular-nums;
+}
+.metric__of { color: var(--ink-faint); }
+.metric__unit { display: block; margin-top: 4px; font-size: 12px; color: var(--ink-soft); }
+
+/* ---------- buttons ---------- */
+
+.btn {
+  font: inherit; font-weight: 600; font-size: 13px;
+  padding: 9px 14px; border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong);
+}
+.btn:hover:not(:disabled) { background: var(--surface-sunk); }
+.btn:disabled { opacity: .42; cursor: default; }
+.btn--block { width: 100%; }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.btn--go:not(:disabled) { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.btn--stop:not(:disabled) { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.btn--quiet { background: transparent; }
+.btn--icon {
+  padding: 4px 9px; line-height: 1.2; font-size: 12px;
+  color: var(--ink-faint);
+}
+.btn--icon:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }
+
+.btnrow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.btngrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.btngrid .btn { padding: 7px 8px; font-size: 12px; }
+
+.hint { margin: 0; font-size: 11.5px; color: var(--ink-faint); }
+.hint--bad { color: var(--bad); }
+
+/* ---------- shots and results ---------- */
+
+.filmrow { display: flex; gap: 12px; flex-wrap: wrap; }
+.frame {
+  margin: 0; width: 190px; border-radius: var(--radius-sm); overflow: hidden;
+  background: var(--surface-sunk); border: 1px solid var(--line);
+}
+.frame img { width: 100%; display: block; aspect-ratio: 3 / 2; object-fit: cover; }
+.frame figcaption {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
+}
+.frame--empty {
+  display: grid; place-items: center; aspect-ratio: 3 / 2;
+  border-style: dashed; color: var(--ink-faint); font-size: 22px; font-weight: 700;
+}
+
+/* --- rearranging the shots during review --- */
+.frame--movable { cursor: grab; transition: border-color .12s, transform .12s; }
+.frame--movable:active { cursor: grabbing; }
+.frame--dragging { opacity: .4; }
+/* The drop target, shown as a leading edge rather than a full outline so it is
+   obvious which side the shot is going in on. */
+.frame--over { border-color: var(--accent); transform: translateY(-2px); }
+.frame--over img { box-shadow: inset 3px 0 0 var(--accent); }
+.frame__move {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 5px 6px; border-top: 1px solid var(--line);
+}
+.frame__move .btn--icon { width: 30px; height: 26px; font-size: 15px; line-height: 1; }
+.frame__move .btn--icon:hover:not(:disabled) {
+  color: var(--accent); border-color: var(--accent);
+}
+.frame__slot {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--ink-faint); font-weight: 700;
+}
+.frame__shot {
+  font-weight: 700; color: var(--ink-soft);
+}
+/* Deliberately full width and plainly labelled: at a booth this gets pressed
+   while talking to a guest, so it should not need aiming at. */
+.frame__retake {
+  border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0;
+  font-size: 12px; padding: 7px 8px;
+}
+.frame__retake:hover:not(:disabled) { color: var(--warn); border-top-color: var(--warn); }
+
+.result { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.result__strip {
+  max-height: 320px; width: auto; border-radius: var(--radius-sm);
+  background: #fff; box-shadow: var(--shadow);
+}
+.facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; }
+.facts dt {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-faint); font-weight: 700;
+}
+.facts dd { margin: 0; font-size: 13px; }
+.path { word-break: break-all; color: var(--ink-soft); }
+
+/* ---------- forms shared by setup and the editor ---------- */
+
+input[type='text'], input[type='number'], input[type='color'], input:not([type]),
+select, .control {
+  font: inherit; padding: 7px 10px; border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong);
+}
+.control--sm { padding: 4px 7px; font-size: 12px; }
+.control--color { padding: 2px; height: 34px; width: 56px; }
+.control--range { padding: 0; border: 0; background: none; width: 100%; accent-color: var(--accent); }
+
+/* A styled label standing in for the browser's file button, which cannot be
+   themed and looked out of place next to everything else. */
+.filebtn { position: relative; overflow: hidden; text-align: center; cursor: pointer; }
+.filebtn input[type='file'] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+input[type='color'] { padding: 2px; height: 34px; width: 56px; }
+
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.fields { display: flex; gap: 12px; flex-wrap: wrap; }
+.fields label { display: block; font-size: 12px; color: var(--ink-soft); }
+.fields input { display: block; margin-top: 4px; width: 120px; }
+.fields input[type='color'] { width: 56px; }
+.fields .filebtn { display: block; margin-top: 4px; }
+
+.pill {
+  font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--line-strong); color: var(--ink-soft);
+}
+.pill--Ready, .pill--ReviewShots, .pill--Done { color: var(--ok); border-color: var(--ok); }
+.pill--Faulted, .pill--TimedOut, .pill--Disconnected { color: var(--bad); border-color: var(--bad); }
+.pill--Countdown, .pill--Collecting { color: var(--accent); border-color: var(--accent); }
+
+.banner {
+  margin: 0 0 10px; padding: 9px 12px; border-radius: var(--radius-sm);
+  background: var(--bad-wash); border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent);
+  color: var(--ink);
+}
+
+button.linkish {
+  background: none; border: none; padding: 0 8px 0 0;
+  color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline;
+}
+a.button, .btn.button {
+  display: inline-block; padding: 9px 14px; border-radius: var(--radius-sm);
+  background: var(--accent); color: var(--accent-ink) !important;
+  text-decoration: none !important; font-weight: 600; font-size: 13px;
+}
+
+/* ---------- setup ---------- */
+
+.settings { display: flex; flex-direction: column; gap: 14px; }
+.settings > h2 {
+  margin: 0; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--ink-faint);
+}
+.settings__group {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 18px; background: var(--surface);
+}
+.settings__group h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--accent); margin: 0 0 10px; font-weight: 700;
+}
+.settings__group label { display: block; margin-bottom: 10px; font-size: 12.5px; color: var(--ink-soft); }
+.settings__group select { width: 100%; max-width: 340px; }
+.settings__folder input {
+  width: 100%; margin-top: 4px; font-family: var(--mono); font-size: 12.5px;
+}
+.settings__backdrop { display: flex; gap: 12px; align-items: center; margin: 8px 0 10px; }
+.settings__backdrop img {
+  width: 160px; height: 90px; object-fit: cover;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+
+/* ---------- diagnostics ---------- */
+
+.diagnostics { display: flex; flex-direction: column; gap: 20px; }
+.diagnostics section { margin: 0; }
+.diagnostics h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--ink-faint); border-bottom: 1px solid var(--line);
+  padding-bottom: 6px; margin: 0 0 10px; font-weight: 700;
+}
+.diagnostics table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.diagnostics th {
+  text-align: left; font-weight: 600; color: var(--ink-soft);
+  padding: 6px 12px 6px 0; vertical-align: top; white-space: nowrap;
+}
+.diagnostics td { padding: 6px 12px 6px 0; vertical-align: top; }
+.diagnostics thead th { border-bottom: 1px solid var(--line); }
+.diagnostics tbody tr:nth-child(even) { background: var(--surface-sunk); }
+
+/* A section that is important to keep but not to read while running a booth. */
+.foldout {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); padding: 0 16px;
+}
+.foldout > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 0; cursor: pointer; list-style: none;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .09em; color: var(--ink-faint);
+}
+.foldout > summary::-webkit-details-marker { display: none; }
+.foldout > summary::after { content: '＋'; font-size: 13px; }
+.foldout[open] > summary::after { content: '－'; }
+.foldout > summary:hover { color: var(--ink); }
+.foldout > summary > span:first-child { margin-right: auto; }
+.foldout__count { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.foldout > *:last-child { margin-bottom: 14px; }
+
+/* Wide tables scroll inside their own box rather than widening the page. */
+.tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tablewrap table { min-width: 420px; }
+
+/* ---------- template editor ---------- */
+
+.templates { display: flex; flex-direction: column; gap: 16px; }
+
+/* Canvas, controls, preview -- in that order, side by side. Laid out as a grid
+   rather than a wrapping flex row, which used to drop the controls underneath a
+   wide landscape canvas and leave the preview stranded below both. */
+.templates__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 340px) minmax(0, 0.9fr);
+  gap: 22px;
+  align-items: start;
+}
+.templates__stage {
+  min-width: 0; display: flex; flex-direction: column;
+  align-items: center; gap: 10px;
+}
+.templates__stage > p { margin: 0; align-self: stretch; }
+.templates__panel { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.templates__preview { min-width: 0; }
+.templates__preview .strip { max-width: 100%; max-height: min(62vh, 620px); width: auto; }
+.placeholder {
+  margin: 0; padding: 20px; border: 1px dashed var(--line-strong);
+  border-radius: var(--radius); color: var(--ink-faint); font-size: 12.5px;
+}
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.grid2 label { margin: 0; }
+.grid2 input { width: 100%; }
+.templates__panel section {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; background: var(--surface);
+}
+.templates__panel h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-faint); margin: 0 0 10px; font-weight: 700;
+}
+.templates__panel label { display: block; margin-bottom: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.templates__panel input:not([type='color']) { width: 100%; margin-top: 4px; }
+.templates__preview h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-faint); margin: 0 0 8px; font-weight: 700;
+}
+
+.stagebox {
+  position: relative; border-radius: var(--radius-sm); overflow: hidden;
+  box-shadow: var(--shadow); touch-action: none; user-select: none;
+  max-width: 100%;
+}
+.stagebox__art {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  /* Matches the compositor, which covers the canvas and centre-crops. */
+  object-fit: cover;
+  pointer-events: none;   /* art must never swallow a drag */
+}
+/* A backdrop sits under the photos; a frame sits over them. */
+.stagebox__art--behind { z-index: 0; }
+.stagebox__art--front { z-index: 2; }
+
+.slot {
+  position: absolute; z-index: 1; cursor: move; overflow: hidden;
+  outline: 2px dashed color-mix(in srgb, var(--accent) 85%, transparent);
+  outline-offset: -2px;
+}
+.slot img { width: 100%; height: 100%; display: block; }
+.slot--active { outline: 2px solid var(--warn); z-index: 3; }
+.slot__index {
+  position: absolute; top: 4px; left: 6px; font-family: var(--mono);
+  font-size: 11px; font-weight: 700; color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .9);
+}
+.slot__handle {
+  position: absolute; right: -1px; bottom: -1px; width: 16px; height: 16px;
+  background: var(--warn); cursor: nwse-resize; border-radius: 3px 0 3px 0;
+}
+.slotlist { list-style: none; margin: 0 0 10px; padding: 0; }
+.slotlist li {
+  display: flex; gap: 8px; align-items: center; padding: 5px 8px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  margin-bottom: 5px; cursor: pointer; font-size: 12.5px;
+}
+.slotlist li.active { border-color: var(--warn); background: var(--warn-wash); }
+.slotlist li code { flex: 1; font-size: 11.5px; }
+.slotlist__no {
+  display: grid; place-items: center; width: 20px; height: 20px; flex: none;
+  border-radius: 5px; background: var(--surface-sunk); border: 1px solid var(--line);
+  font-size: 11px; font-weight: 700;
+}
+.slotlist button { padding: 2px 8px; }
+.strip { border-radius: var(--radius-sm); background: #fff; box-shadow: var(--shadow); }
+
+/* =========================================================================
+   Guest display.
+
+   Deliberately outside the theme system: it is full-bleed, guest-facing, and
+   carries the event's own backdrop set in Setup. An operator flipping to light
+   mode must not repaint the screen the guests are looking at.
+   ========================================================================= */
+
+.stage {
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 20px; padding: 24px;
+  background-color: #14161a; color: #e8eaed;
+}
+.stage h1 { font-size: 34px; margin: 0; font-weight: 800; letter-spacing: -.03em; }
+.stage--idle h1, .stage--done h1 { font-size: 44px; }
+.stage .muted { color: #9aa3ad; }
+/* Sized from the viewport height rather than a fixed pixel cap: on a 1080p guest
+   monitor the old min(78vw, 1000px) filled about half the screen, and the mirror
+   is the thing guests are actually looking at. */
+.stage__mirror {
+  position: relative;
+  width: min(94vw, calc(66vh * 16 / 9));
+}
+
+.mirror {
+  position: relative; width: 100%; aspect-ratio: 16 / 9;
+  background: #0d0f12; border-radius: 12px; overflow: hidden;
+}
+.mirror video {
+  width: 100%; height: 100%; object-fit: cover;
+  /* Guests expect a mirror; an unmirrored feed feels subtly wrong. */
+  transform: scaleX(-1);
+}
+.mirror--error {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 24px 32px; text-align: center; border: 1px dashed #2a2e35;
+}
+.mirror__headline { font-size: 22px; font-weight: 700; margin: 0; color: #ff9a8b; }
+.mirror__hints {
+  margin: 4px 0 8px; padding: 0; list-style: none;
+  color: #9aa3ad; font-size: 14px; line-height: 1.7; max-width: 46ch;
+}
+
+/* Shows the strip slot's crop, not the camera frame: a 3:2 sensor into a 4:3
+   slot loses the sides, and with them anyone's shoulders. */
+/* ---------- framing guide ----------
+   Corner brackets marking the strip crop, with everything outside dimmed. The
+   dimming is done with a huge spread shadow rather than four overlay divs, so
+   the shape stays in one place and cannot drift out of alignment. */
+.guide {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  height: 86%; pointer-events: none;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .48);
+  border-radius: 4px;
+}
+.guide__corner {
+  position: absolute; width: 42px; height: 42px;
+  border: 4px solid #ffd23f;
+}
+.guide__corner--tl { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-radius: 6px 0 0 0; }
+.guide__corner--tr { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-radius: 0 6px 0 0; }
+.guide__corner--bl { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-radius: 0 0 0 6px; }
+.guide__corner--br { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-radius: 0 0 6px 0; }
+
+/* Guests stand too close and lose the top of their heads; this is where the
+   tallest one should sit. */
+.guide__headroom {
+  position: absolute; left: 8%; right: 8%; top: 14%;
+  border-top: 2px dashed rgba(255, 210, 63, .5);
+}
+.guide__centre {
+  position: absolute; left: 50%; top: 50%; width: 26px; height: 26px;
+  transform: translate(-50%, -50%);
+  background:
+    linear-gradient(rgba(255, 210, 63, .75), rgba(255, 210, 63, .75)) center / 2px 100% no-repeat,
+    linear-gradient(rgba(255, 210, 63, .75), rgba(255, 210, 63, .75)) center / 100% 2px no-repeat;
+}
+.guide__note {
+  position: absolute; left: 0; right: 0; bottom: 12px; margin: 0;
+  text-align: center; font-size: clamp(13px, 1.6vw, 20px); font-weight: 600;
+  color: rgba(255, 255, 255, .85); text-shadow: 0 2px 10px rgba(0, 0, 0, .8);
+  pointer-events: none;
+}
+
+.countdown {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 22vh; font-weight: 800; color: #fff;
+  text-shadow: 0 6px 40px rgba(0, 0, 0, .7); animation: pop .4s ease-out;
+}
+@keyframes pop { from { transform: scale(1.35); opacity: .25 } to { transform: scale(1); opacity: 1 } }
+
+.hold, .attract {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, .6); border-radius: 999px;
+}
+.hold { bottom: 18px; padding: 6px 18px; font-size: 18px; }
+.attract { bottom: 24px; padding: 10px 28px; font-size: 30px; font-weight: 600; }
+
+.shotcount { font-size: 19px; color: #9aa3ad; margin: 0; }
+
+.filmstrip { display: flex; gap: 12px; }
+.filmstrip .shot {
+  margin: 0; width: 150px; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden;
+  background: rgba(0, 0, 0, .35); border: 1px solid rgba(255, 255, 255, .12);
+}
+.filmstrip--large .shot { width: min(26vw, 340px); }
+.filmstrip .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.filmstrip .shot--empty {
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255, 255, 255, .3); font-size: 26px; border-style: dashed;
+}
+.stage .strip { height: min(72vh, 900px); width: auto; }
+.stage--done { gap: 16px; }
+
+/* The handover: the strip and the guest's QR side by side, since they are read
+   together -- "that is mine, and this is how I get it". */
+.handover {
+  display: flex; align-items: center; justify-content: center;
+  gap: clamp(20px, 5vw, 64px); flex-wrap: wrap;
+}
+.handover .strip { height: min(62vh, 780px); }
+.handover__note {
+  margin: 0; font-size: clamp(18px, 2.4vw, 28px); color: rgba(255, 255, 255, .78);
+  max-width: 14em; text-align: center;
+}
+.qr { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+/* White plate behind the code: guest backdrops can be any colour, and a QR on a
+   dark or busy ground is the classic reason a phone will not read it. */
+.qr img {
+  width: min(34vh, 380px); height: auto; display: block;
+  background: #fff; padding: 16px; border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+  /* Nearest-neighbour: a QR is a grid of hard squares and smoothing it on the
+     way up is what turns a scannable code into a fuzzy one. */
+  image-rendering: pixelated;
+}
+.qr__caption {
+  margin: 0; font-size: clamp(16px, 2vw, 24px); font-weight: 600;
+  color: rgba(255, 255, 255, .9); letter-spacing: .01em;
+}
+
+/* ---------- narrow screens ---------- */
+
+/* Laptop: the editor's third column is the first thing to give. */
+@media (max-width: 1240px) {
+  .templates__layout {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 330px);
+  }
+  /* Preview moves under the canvas rather than squeezing the controls out. */
+  .templates__preview { grid-column: 1 / -1; }
+  .templates__preview .strip { max-height: 46vh; }
+}
+
+/* Tablet: the rail becomes a header strip and everything goes single column. */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .rail {
+    position: static; height: auto; border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rail__nav { flex-direction: row; flex-wrap: wrap; }
+  .navitem { flex: 1 1 auto; }
+  .navitem__hint { display: none; }
+  .rail__foot { margin-top: 4px; }
+
+  .work { padding: 18px 16px 48px; }
+  .stagecard { padding: 20px; }
+  .stagecard__headline { font-size: 24px; }
+  .metric { font-size: 36px; }
+
+  .templates__layout { grid-template-columns: minmax(0, 1fr); }
+  .templates__panel { max-width: none; }
+  .settings .fields { flex-wrap: wrap; }
+}
+
+/* Phone: single column throughout, and controls big enough to hit with a thumb. */
+@media (max-width: 640px) {
+  .work { padding: 14px 12px 40px; gap: 14px; }
+  .panel, .settings__group, .templates__panel section { padding: 14px; }
+
+  .stagecard { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .stagecard__metric { text-align: left; }
+  .stagecard__headline { font-size: 21px; }
+
+  /* 44px is the smallest comfortable touch target. */
+  .btn, .control, input, select { min-height: 44px; }
+  .btn--icon, .control--sm { min-height: 34px; }
+  .btnrow, .btngrid, .grid2 { grid-template-columns: 1fr; }
+  .controls { flex-direction: column; align-items: stretch; }
+  .controls .btn, .controls .filebtn { width: 100%; }
+
+  .fields { flex-direction: column; }
+  .fields input:not([type='color']), .settings .fields input:not([type='color']) { width: 100%; }
+  .frame { width: 100%; }
+  .result { flex-direction: column; }
+  .result__strip { max-height: 40vh; }
+  .facts { grid-template-columns: 1fr; gap: 2px 0; }
+  .facts dt { margin-top: 8px; }
+
+  .diagnostics th { white-space: normal; }
+}
+
+/* Guest display: the countdown and headings scale with the screen, since it can
+   be anything from a phone being tested to a 32-inch monitor. */
+@media (max-width: 640px) {
+  .stage { padding: 16px; gap: 14px; }
+  .stage h1, .stage--idle h1, .stage--done h1 { font-size: clamp(22px, 7vw, 44px); }
+  .handover { gap: 18px; }
+  .handover .strip { height: min(38vh, 420px); }
+  .qr img { width: min(46vw, 260px); }
+  .stage__mirror { width: 100%; }
+  .guide__corner { width: 26px; height: 26px; border-width: 3px; }
+  .filmstrip .shot { width: min(28vw, 150px); }
+  .attract { font-size: clamp(18px, 5vw, 30px); padding: 8px 18px; }
+}

@@ -1,0 +1,383 @@
+using System.Text.Json.Serialization;
+using Serilog;
+using Photobooth.Cameras;
+using Photobooth.Core;
+using Photobooth.Delivery;
+using Photobooth.Imaging;
+using Photobooth.Server;
+
+// ContentRoot must be the app folder, not the shell's working directory.
+// Without this, running the built DLL from anywhere but the project directory
+// leaves ASP.NET unable to find wwwroot or appsettings.json -- and it fails by
+// serving 404s rather than complaining, which is a miserable way to lose an hour.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
+
+// Untracked local overrides, which is where the Google OAuth client lives. Read
+// after appsettings.json so it wins, optional so a build without one runs
+// unchanged -- which is exactly the field-test build.
+builder.Configuration.AddJsonFile(
+    "appsettings.Local.json", optional: true, reloadOnChange: false);
+
+builder.Services.Configure<WatchFolderOptions>(
+    builder.Configuration.GetSection(WatchFolderOptions.SectionName));
+builder.Services.Configure<MockEosUtilityOptions>(
+    builder.Configuration.GetSection(MockEosUtilityOptions.SectionName));
+builder.Services.Configure<SessionSettings>(
+    builder.Configuration.GetSection(SessionSettings.SectionName));
+builder.Services.Configure<TemplateOptions>(
+    builder.Configuration.GetSection(TemplateOptions.SectionName));
+builder.Services.Configure<ArchiveOptions>(
+    builder.Configuration.GetSection(ArchiveOptions.SectionName));
+builder.Services.Configure<DriveOptions>(
+    builder.Configuration.GetSection(DriveOptions.SectionName));
+
+// Relative paths resolve against the app folder rather than whatever directory
+// the shell happened to be in, so `dotnet run` and an unzipped published build
+// behave identically -- which matters for a field-test build.
+builder.Services.PostConfigure<WatchFolderOptions>(o =>
+{
+    o.Path = ResolveAppPath(o.Path);
+    o.Extensions = o.Extensions.Length == 0
+        ? WatchFolderOptions.DefaultExtensions
+        : o.Extensions.Select(e => e.ToLowerInvariant()).Distinct().ToArray();
+});
+builder.Services.PostConfigure<MockEosUtilityOptions>(
+    o => o.SourceFolder = ResolveAppPath(o.SourceFolder));
+builder.Services.PostConfigure<TemplateOptions>(o => o.Folder = ResolveAppPath(o.Folder));
+builder.Services.PostConfigure<ArchiveOptions>(o => o.Folder = ResolveAppPath(o.Folder));
+builder.Services.PostConfigure<DriveOptions>(o => o.TokenStore = ResolveAppPath(o.TokenStore));
+
+static string ResolveAppPath(string path) => Path.IsPathRooted(path)
+    ? path
+    : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, path));
+
+// A rolling log on disk is what a remote tester actually sends back; console
+// output vanishes the moment they close the window.
+var logFolder = ResolveAppPath("data/logs");
+Directory.CreateDirectory(logFolder);
+builder.Host.UseSerilog((context, config) => config
+    .ReadFrom.Configuration(context.Configuration)
+    .WriteTo.Console()
+    .WriteTo.File(
+        Path.Combine(logFolder, "photobooth-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        shared: true));
+
+// States travel as names, not numbers: a snapshot showing "Collecting" is worth
+// a great deal more than one showing 2 when reading a field tester's logs.
+builder.Services.ConfigureHttpJsonOptions(
+    o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services
+    .AddSignalR()
+    .AddJsonProtocol(o =>
+        o.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+// The operator's own settings, read before the options are finalised so a saved
+// watch folder is in force from the first frame rather than applied afterwards.
+var settingsStore = new SettingsStore(
+    ResolveAppPath("data/settings.json"),
+    LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SettingsStore>());
+builder.Services.AddSingleton(settingsStore);
+
+builder.Services.PostConfigure<WatchFolderOptions>(o =>
+{
+    if (!string.IsNullOrWhiteSpace(settingsStore.Current.WatchFolder))
+    {
+        o.Path = settingsStore.Current.WatchFolder!;
+    }
+});
+builder.Services.PostConfigure<ArchiveOptions>(o =>
+{
+    if (!string.IsNullOrWhiteSpace(settingsStore.Current.OutputFolder))
+    {
+        o.Folder = settingsStore.Current.OutputFolder!;
+    }
+});
+builder.Services.PostConfigure<DriveOptions>(o =>
+{
+    // Configuration decides whether Drive is *possible* -- the field-test build
+    // ships with no client at all. The operator's switch only ever turns it off.
+    if (settingsStore.Current.DriveEnabled is { } enabled)
+    {
+        o.Enabled = enabled;
+    }
+
+    if (!string.IsNullOrWhiteSpace(settingsStore.Current.DriveFolderName))
+    {
+        o.ParentFolderName = settingsStore.Current.DriveFolderName!;
+    }
+});
+builder.Services.PostConfigure<SessionSettings>(o =>
+{
+    o.CountdownSeconds = settingsStore.Current.CountdownSeconds ?? o.CountdownSeconds;
+    o.NoPhotoTimeoutSeconds =
+        settingsStore.Current.NoPhotoTimeoutSeconds ?? o.NoPhotoTimeoutSeconds;
+});
+
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<WatchFolderCamera>();
+builder.Services.AddSingleton<ICameraDevice>(sp => sp.GetRequiredService<WatchFolderCamera>());
+builder.Services.AddSingleton<MockEosUtility>();
+builder.Services.AddSingleton<FileTemplateProvider>();
+builder.Services.AddSingleton<ITemplateProvider>(
+    sp => sp.GetRequiredService<FileTemplateProvider>());
+builder.Services.AddSingleton<StripCompositor>();
+builder.Services.AddSingleton<SessionArchive>();
+builder.Services.AddSingleton<SessionEngine>();
+builder.Services.AddSingleton<DiagnosticsService>();
+builder.Services.AddSingleton<SessionCoordinator>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionCoordinator>());
+
+// Delivery. Off unless both a client is configured and the operator says so, so
+// the field-test build uploads nothing and needs no Google account.
+builder.Services.AddSingleton<DriveAuth>();
+builder.Services.AddSingleton<DrivePublisher>();
+builder.Services.AddSingleton<IGalleryPublisher>(sp => sp.GetRequiredService<DrivePublisher>());
+builder.Services.AddSingleton<UploadQueue>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UploadQueue>());
+
+var app = builder.Build();
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+app.MapHub<SessionHub>("/hub/session");
+
+app.MapTemplateEndpoints();
+app.MapSettingsEndpoints();
+
+app.MapGet("/api/state", (
+    WatchFolderCamera camera,
+    SessionEngine engine,
+    SessionCoordinator coordinator,
+    FileTemplateProvider templates,
+    SessionArchive archive) =>
+{
+    // The shape of one photo on the strip, so the guest screen can draw a
+    // framing guide that matches the template actually in use rather than the
+    // 4:3 it assumed for its first three milestones.
+    var template = templates.Current;
+    var slot = template.Slots.Count > 0 ? template.Slots[0] : null;
+    var slotAspect = slot is null
+        ? 4d / 3d
+        : slot.W * template.Canvas.Width / (slot.H * template.Canvas.Height);
+
+    return Results.Ok(new
+    {
+        camera = new
+        {
+            status = camera.Status.ToString(),
+            canTrigger = camera.Capabilities.CanTrigger,
+            watchFolder = camera.WatchFolderPath,
+        },
+        session = engine.Snapshot,
+        delivery = coordinator.CurrentDelivery(),
+        slotAspect,
+
+        // Where finished sessions are written. The console showed only a folder
+        // *name* after a session, which is no help in finding it -- and the
+        // default sits beside the exe, so "the photos did not save" is the
+        // reasonable conclusion when they saved somewhere nobody looked.
+        outputFolder = archive.Root,
+        build = new { version = DiagnosticsService.Version },
+    });
+});
+
+// --- delivery ---
+
+app.MapGet("/api/delivery", (SessionCoordinator coordinator) =>
+    Results.Ok(coordinator.CurrentDelivery()));
+
+// Sign in to the booth's Google account. Deliberately only reachable from Setup:
+// this opens a browser window, which must never happen over a guest display
+// mid-event, so the upload queue reports "needs authorising" instead of calling it.
+app.MapPost("/api/delivery/authorize", async (
+    DriveAuth auth, UploadQueue queue, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await auth.AuthorizeAsync(cancellationToken);
+        var account = await auth.RefreshAccountAsync(cancellationToken);
+        return Results.Ok(new { account, status = queue.Status() });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/delivery/sign-out", async (DriveAuth auth) =>
+{
+    await auth.SignOutAsync();
+    return Results.Ok(new { signedOut = true });
+});
+
+// Put a session back in the queue: one that gave up, or one captured while
+// delivery was switched off.
+app.MapPost("/api/delivery/republish/{folder}", (string folder, UploadQueue queue) =>
+{
+    if (!IsSafeSegment(folder))
+    {
+        return Results.BadRequest();
+    }
+
+    var record = queue.Republish(folder);
+    return record is null
+        ? Results.NotFound(new { error = $"No session called {folder}." })
+        : Results.Ok(record);
+});
+
+// --- diagnostics: how a test in another building gets debugged ---
+
+app.MapGet("/api/diagnostics", (DiagnosticsService d) => Results.Ok(d.Snapshot()));
+
+// Tapped as the remote is pressed. The app cannot know when the shutter fired,
+// so a human marking the moment is the only way to measure press-to-file time.
+app.MapPost("/api/diagnostics/mark-press", (DiagnosticsService d) =>
+{
+    d.MarkPress();
+    return Results.Ok(new { markedAtUtc = DateTimeOffset.UtcNow });
+});
+
+app.MapGet("/api/diagnostics/bundle", (DiagnosticsService d, IConfiguration config) =>
+{
+    var bytes = DiagnosticsBundle.Create(
+        d.Snapshot(), ResolveAppPath("data/logs"), config);
+    var name = $"photobooth-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
+    return Results.File(bytes, "application/zip", name);
+});
+
+app.MapPost("/api/session/arm", (SessionCoordinator c) => Results.Ok(c.Arm()));
+app.MapPost("/api/session/retake", (SessionEngine e) => Results.Ok(e.RetakeLast()));
+
+// Retake one pose out of the middle of a strip, leaving the rest where they are.
+// The slot is 1-based here because that is what the console shows the operator.
+app.MapPost("/api/session/retake/{slot:int}", (int slot, SessionEngine e) =>
+{
+    var result = e.Retake(slot - 1);
+    return result.Ok
+        ? Results.Ok(result.Snapshot)
+        : Results.BadRequest(new { error = result.Error, snapshot = result.Snapshot });
+});
+app.MapPost("/api/session/resume", (SessionEngine e) => Results.Ok(e.Resume()));
+// The shots, rearranged. Positions are expressed in the order the console is
+// currently showing, so a drag translates straight into this without the client
+// needing to know capture order.
+app.MapPut("/api/session/order", (SessionEngine e, ReorderRequest body) =>
+{
+    var result = e.Reorder(body.Order ?? []);
+    return result.Ok
+        ? Results.Ok(result.Snapshot)
+        : Results.BadRequest(new { error = result.Error, snapshot = result.Snapshot });
+});
+app.MapPost("/api/session/order/reset", (SessionEngine e) => Results.Ok(e.ResetOrder()));
+app.MapPost("/api/session/accept", (SessionEngine e) => Results.Ok(e.Accept()));
+app.MapPost("/api/session/abort", (SessionEngine e) => Results.Ok(e.Abort("Aborted by operator.")));
+
+// Stands in for a press of the BR-E1 remote. `mode` reproduces the ways EOS
+// Utility is expected to misbehave -- see MockWriteMode.
+app.MapPost("/api/mock/press", async (
+    MockEosUtility mock, string? mode, CancellationToken cancellationToken) =>
+{
+    if (!Enum.TryParse<MockWriteMode>(mode ?? nameof(MockWriteMode.Normal), true, out var parsed))
+    {
+        return Results.BadRequest(new { error = $"Unknown mode '{mode}'." });
+    }
+
+    try
+    {
+        var path = await mock.SimulatePressAsync(parsed, cancellationToken);
+        return Results.Ok(new { file = Path.GetFileName(path), mode = parsed.ToString() });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// Serves a file out of an archived session folder: the strip, or a raw photo.
+// Both segments are constrained to a single path element so a crafted name
+// cannot walk out of the archive.
+app.MapGet("/api/sessions/{folder}/{file}", (string folder, string file, SessionArchive archive) =>
+{
+    if (!IsSafeSegment(folder) || !IsSafeSegment(file))
+    {
+        return Results.BadRequest();
+    }
+
+    var full = Path.Combine(archive.Root, folder, file);
+    if (!File.Exists(full))
+    {
+        return Results.NotFound();
+    }
+
+    var type = Path.GetExtension(full).ToLowerInvariant() switch
+    {
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".png" => "image/png",
+        ".json" => "application/json",
+        _ => "application/octet-stream",
+    };
+
+    return Results.File(full, type);
+});
+
+app.MapGet("/api/sessions", (SessionArchive archive) => Results.Ok(new
+{
+    root = archive.Root,
+    freeDiskBytes = archive.FreeDiskBytes(),
+    diskIsLow = archive.DiskIsLow(),
+    sessions = archive.All().Take(50),
+}));
+
+// The guest's QR, rendered from the link recorded for that session. Generated
+// here rather than in the browser so the code cannot drift from the URL, or fail
+// to load on the one screen that has to work.
+app.MapGet("/api/sessions/{folder}/qr.png", (string folder, SessionArchive archive) =>
+{
+    if (!IsSafeSegment(folder))
+    {
+        return Results.BadRequest();
+    }
+
+    var record = archive.All().FirstOrDefault(r => r.FolderName == folder);
+    return record?.DriveUrl is null
+        ? Results.NotFound()
+        : Results.File(QrRenderer.Png(record.DriveUrl), "image/png");
+});
+
+static bool IsSafeSegment(string value) =>
+    !string.IsNullOrWhiteSpace(value)
+    && value.IndexOfAny(['/', '\\']) < 0
+    && !value.Contains("..")
+    && value == Path.GetFileName(value);
+
+// Serves a photo out of the watch folder. File name only -- no paths -- so a
+// crafted name cannot walk out of the folder.
+app.MapGet("/api/photos/{fileName}", (string fileName, WatchFolderCamera camera) =>
+{
+    if (fileName.Contains('/') || fileName.Contains('\\') || fileName.Contains(".."))
+    {
+        return Results.BadRequest();
+    }
+
+    var full = Path.Combine(camera.WatchFolderPath, Path.GetFileName(fileName));
+    return File.Exists(full) ? Results.File(full, "image/jpeg") : Results.NotFound();
+});
+
+// /operator and /display are client-side views of one bundle.
+app.MapFallbackToFile("index.html");
+
+app.Run();
+
+/// <param name="Order">
+/// One entry per shot: the position, in the order the console is showing, that
+/// should move into that slot. Dragging the fourth of six to the front sends
+/// [3, 0, 1, 2, 4, 5].
+/// </param>
+internal sealed record ReorderRequest(int[]? Order);

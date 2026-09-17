@@ -1,0 +1,163 @@
+name: Release
+
+# Tag a commit and this produces the ZIP the field tester downloads. Tying every
+# build to a tag means you always know exactly which commit produced a result --
+# which matters when the person running the camera is somewhere else.
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'phase-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The build stamps the commit into the assembly version.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Photobooth.Web/package-lock.json
+
+      - name: Build the frontend
+        working-directory: src/Photobooth.Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Test
+        run: dotnet test --configuration Release --logger "console;verbosity=minimal"
+
+      # The tag is the version, so the two can never drift. They did: v0.8.0
+      # shipped reporting itself as 0.7.0, because the csproj held the number and
+      # nobody remembered to bump it. The field-test sheet asks the tester to
+      # quote that string, so a wrong one is worse than none.
+      - name: Version from the tag
+        shell: pwsh
+        run: |
+          $ref = $env:GITHUB_REF_NAME
+          if ($ref -match '^v(\d+\.\d+\.\d+)$') {
+            echo "BUILD_VERSION=$($Matches[1])" >> $env:GITHUB_ENV
+            Write-Host "Building as $($Matches[1])"
+          } else {
+            # A non-version tag such as phase-1 keeps whatever the csproj says.
+            echo "BUILD_VERSION=" >> $env:GITHUB_ENV
+            Write-Host "$ref is not a version tag; using the project's version."
+          }
+
+      - name: Publish self-contained
+        shell: pwsh
+        run: |
+          $args = @(
+            'publish', 'src/Photobooth.Server',
+            '--configuration', 'Release',
+            '--runtime', 'win-x64',
+            '--self-contained', 'true',
+            '-p:PublishSingleFile=true',
+            '-p:EnableCompressionInSingleFile=true',
+            '--output', 'artifacts/publish'
+          )
+          if ($env:BUILD_VERSION) { $args += "-p:Version=$env:BUILD_VERSION" }
+          dotnet @args
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # A build that cannot run a mock session is useless to a field tester, and
+      # "the folder exists" is not the same as "the folder has files in it" --
+      # that exact gap shipped a release whose samples folder was empty.
+      - name: Smoke test the published build
+        shell: pwsh
+        run: |
+          foreach ($dir in 'samples', 'wwwroot', 'templates') {
+            $count = (Get-ChildItem "artifacts/publish/$dir" -File -Recurse).Count
+            if ($count -eq 0) { throw "artifacts/publish/$dir is empty" }
+            Write-Host "$dir has $count file(s)"
+          }
+
+          # -FilePath resolves against the *current* directory, not
+          # -WorkingDirectory, so both need to be absolute.
+          $publish = (Resolve-Path artifacts/publish).Path
+          $exe = Start-Process -PassThru -WorkingDirectory $publish `
+                               -FilePath (Join-Path $publish 'Photobooth.Server.exe')
+          try {
+            $ready = $false
+            foreach ($i in 1..40) {
+              Start-Sleep -Milliseconds 500
+              try {
+                Invoke-RestMethod http://localhost:5000/api/state -TimeoutSec 2 | Out-Null
+                $ready = $true; break
+              } catch { }
+            }
+            if (-not $ready) { throw "the published app never started" }
+
+            # The real check: a mock press must actually produce a photo.
+            $press = Invoke-RestMethod -Method Post `
+                       'http://localhost:5000/api/mock/press?mode=Normal'
+            if (-not $press.file) { throw "mock press produced no file" }
+            Write-Host "mock press wrote $($press.file)"
+
+            Start-Sleep -Seconds 3
+            $diag = Invoke-RestMethod http://localhost:5000/api/diagnostics
+            $accepted = @($diag.ingest | Where-Object { $_.outcome -eq 'Accepted' })
+            if ($accepted.Count -eq 0) { throw "the photo was never ingested" }
+            Write-Host "ingested OK: $($accepted[0].fileName)"
+
+            # The built-in fallback shares the real template's name and size, so a
+            # missing templates folder looks completely fine except for the absent
+            # frame art. Assert the file on disk is what got loaded.
+            if ($diag.assumptions.usingBuiltInFallback) {
+              throw "template fell back to the built-in layout: $($diag.assumptions.templateSource)"
+            }
+            Write-Host "template loaded from $($diag.assumptions.templateSource)"
+
+            foreach ($page in '/operator', '/display', '/diagnostics') {
+              $r = Invoke-WebRequest "http://localhost:5000$page" -TimeoutSec 5
+              if ($r.StatusCode -ne 200) { throw "$page returned $($r.StatusCode)" }
+            }
+            Write-Host "all pages served"
+          }
+          finally {
+            Stop-Process -Id $exe.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            # The smoke test just created data/ with a photo and a log in it.
+            # Shipping that inside the release would put a test image -- and a
+            # precedent for shipping a data folder -- into every download.
+            Remove-Item (Join-Path $publish 'data') -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "photobooth-$($env:GITHUB_REF_NAME)-win-x64"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          # The tester gets the sheet they work from, and -- since whoever runs
+          # a booth configures their own Google account -- the Drive instructions
+          # and the config template to copy. Sending someone a build and then
+          # telling them to go and find the setup doc on GitHub is a bad handover.
+          Copy-Item docs/FIELD-TEST.md artifacts/publish/ -ErrorAction SilentlyContinue
+          Copy-Item docs/DRIVE-SETUP.md artifacts/publish/ -ErrorAction SilentlyContinue
+          Copy-Item docs/QA-CHECKLIST.md artifacts/publish/ -ErrorAction SilentlyContinue
+          Copy-Item appsettings.Local.example.json artifacts/publish/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path artifacts/publish/* -DestinationPath "artifacts/$name.zip"
+          echo "ASSET=artifacts/$name.zip" >> $env:GITHUB_ENV
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          # A tag pushed before its release exists should still produce one.
+          generate_release_notes: false
+          fail_on_unmatched_files: true

@@ -1,0 +1,205 @@
+import { photoUrl } from './types'
+import type { DeliveryUpdate, SessionSnapshot, SessionState } from './types'
+import { useCountdown, useSession } from './useSession'
+import { PosingMirror } from './PosingMirror'
+import { backdropStyle, useDisplayTheme } from './useDisplayTheme'
+
+/**
+ * States that show the guest a live mirror.
+ *
+ * Idle is included on purpose. An attract screen showing people themselves is
+ * what pulls them into the booth, and it means framing and lighting can be
+ * checked without starting a session.
+ */
+const MIRROR_STATES: SessionState[] = ['Idle', 'Countdown', 'Collecting', 'TimedOut']
+
+/** The guest-facing screen. Fullscreen on the external monitor. */
+export function Display() {
+  const { snapshot, delivery, slotAspect } = useSession()
+  const backdrop = backdropStyle(useDisplayTheme())
+
+  if (!snapshot) {
+    return (
+      <div className="stage" style={backdrop}>
+        <p className="muted">Connecting…</p>
+      </div>
+    )
+  }
+
+  const { state } = snapshot
+
+  // Reviewing photos is the one time the mirror is not wanted -- guests are
+  // looking at what they took, not at themselves.
+  if (state === 'ReviewShots') {
+    return (
+      <div className="stage" style={backdrop}>
+        <h1>How do these look?</h1>
+        <Filmstrip snapshot={snapshot} large />
+      </div>
+    )
+  }
+
+  if (state === 'Composing') {
+    return (
+      <div className="stage" style={backdrop}>
+        <h1>Making your strip…</h1>
+        <Filmstrip snapshot={snapshot} />
+      </div>
+    )
+  }
+
+  if (!MIRROR_STATES.includes(state)) {
+    return (
+      <div className="stage stage--done" style={backdrop}>
+        <h1>All done</h1>
+        <div className="handover">
+          {snapshot.stripUrl ? (
+            <img className="strip" src={snapshot.stripUrl} alt="Your photo strip" />
+          ) : (
+            <Filmstrip snapshot={snapshot} />
+          )}
+          <Handover snapshot={snapshot} delivery={delivery} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="stage stage--posing" style={backdrop}>
+      {/*
+        One PosingMirror across every mirror state. Mounting it per state would
+        tear down and re-acquire the webcam on each transition, which shows up as
+        a black flash and a second of nothing exactly as the countdown starts.
+      */}
+      <div className="stage__mirror">
+        <PosingMirror slotAspect={slotAspect} />
+        <Overlay snapshot={snapshot} />
+      </div>
+      <Caption snapshot={snapshot} />
+      <Filmstrip snapshot={snapshot} />
+    </div>
+  )
+}
+
+/**
+ * How the guest takes their photos home.
+ *
+ * The delivery update names the session it belongs to, so this only ever shows a
+ * QR for the strip beside it -- an upload still draining from an earlier guest
+ * must never put someone else's code on the screen.
+ *
+ * When there is no link yet the strip is still shown, with an honest line about
+ * why. A booth with no signal has not failed the guest: their photos exist, and
+ * the operator can send the link on afterwards.
+ */
+function Handover({
+  snapshot,
+  delivery,
+}: {
+  snapshot: SessionSnapshot
+  delivery: DeliveryUpdate | null
+}) {
+  const mine =
+    delivery && snapshot.sessionFolder && delivery.sessionFolder === snapshot.sessionFolder
+      ? delivery
+      : null
+
+  if (!mine?.enabled) {
+    return <p className="handover__note">Ask us for your photos.</p>
+  }
+
+  if (mine.qrUrl) {
+    return (
+      <div className="qr">
+        <img src={mine.qrUrl} alt="QR code linking to your photos" />
+        <p className="qr__caption">Scan to keep your photos</p>
+      </div>
+    )
+  }
+
+  if (mine.state === 'Failed') {
+    return <p className="handover__note">Ask us for your photos — we have them safe.</p>
+  }
+
+  return <p className="handover__note">Getting your link ready…</p>
+}
+
+function Overlay({ snapshot }: { snapshot: SessionSnapshot }) {
+  const counting = snapshot.state === 'Countdown'
+  const remaining = useCountdown(counting ? snapshot.countdownEndsUtc : null)
+
+  if (counting && remaining !== null) {
+    return (
+      <div className="countdown" key={Math.ceil(remaining)}>
+        {Math.max(1, Math.ceil(remaining))}
+      </div>
+    )
+  }
+
+  if (snapshot.state === 'Collecting') {
+    return (
+      <div className="hold">
+        {snapshot.retakingSlot !== null
+          ? `One more of photo ${snapshot.retakingSlot + 1}`
+          : 'Hold it…'}
+      </div>
+    )
+  }
+
+  if (snapshot.state === 'Idle') {
+    return <div className="attract">Step in and smile</div>
+  }
+
+  return <div className="hold">Just a moment…</div>
+}
+
+function Caption({ snapshot }: { snapshot: SessionSnapshot }) {
+  if (snapshot.state === 'Idle') {
+    return (
+      <p className="shotcount">
+        {snapshot.shotCount} photos, then your QR code
+      </p>
+    )
+  }
+
+  if (snapshot.retakingSlot !== null) {
+    return (
+      <p className="shotcount">
+        Taking photo {snapshot.retakingSlot + 1} again
+      </p>
+    )
+  }
+
+  return (
+    <p className="shotcount">
+      Photo {snapshot.currentShot} of {snapshot.shotCount}
+    </p>
+  )
+}
+
+/**
+ * Shots so far, with empty slots for the ones still to come, so guests can see
+ * how far through the session they are.
+ */
+function Filmstrip({
+  snapshot,
+  large = false,
+}: {
+  snapshot: SessionSnapshot
+  large?: boolean
+}) {
+  const slots = Array.from({ length: snapshot.shotCount })
+
+  return (
+    <div className={large ? 'filmstrip filmstrip--large' : 'filmstrip'}>
+      {slots.map((_, i) => {
+        const photo = snapshot.photos[i]
+        return (
+          <figure key={i} className={photo ? 'shot' : 'shot shot--empty'}>
+            {photo ? <img src={photoUrl(photo)} alt={`Photo ${i + 1}`} /> : <span>{i + 1}</span>}
+          </figure>
+        )
+      })}
+    </div>
+  )
+}
