@@ -780,3 +780,18 @@ a.button, .btn.button {
   .filmstrip .shot { width: min(28vw, 150px); }
   .attract { font-size: clamp(18px, 5vw, 30px); padding: 8px 18px; }
 }
+
+/* The per-session placement editor on the operator screen.
+
+   Capped by height rather than width: a 2x6 strip is three times as tall as it
+   is wide, and left to fill the panel it would push everything else off the
+   screen on the one page an operator reads mid-session. */
+.nudger {
+  position: relative;
+  margin: 0 auto;
+  max-height: 46vh;
+  height: 46vh;
+  border-radius: 8px;
+  overflow: hidden;
+  touch-action: none;
+}

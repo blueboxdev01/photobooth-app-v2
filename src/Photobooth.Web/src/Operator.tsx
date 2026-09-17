@@ -1,8 +1,14 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { AppShell, Panel, RailSection } from './AppShell'
 import { photoUrl } from './types'
-import type { DeliveryUpdate, SessionSnapshot, SessionState } from './types'
-import { command, reorder, useCountdown, useSession } from './useSession'
+import type {
+  DeliveryUpdate,
+  Layout,
+  SessionSnapshot,
+  SessionState,
+  SlotRect,
+} from './types'
+import { adjustSlot, command, reorder, useCountdown, useSession } from './useSession'
 
 const MOCK_MODES = [
   ['Normal', 'Simulate press'],
@@ -24,7 +30,7 @@ const HEADLINE: Record<SessionState, string> = {
 }
 
 export function Operator() {
-  const { snapshot, delivery, camera, connected, outputFolder } = useSession()
+  const { snapshot, delivery, camera, connected, outputFolder, layout } = useSession()
   const [mockResult, setMockResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   if (!snapshot) {
@@ -122,12 +128,31 @@ export function Operator() {
         <Filmstrip snapshot={snapshot} />
       </Panel>
 
+      {state === 'ReviewShots' && layout && (
+        <Panel
+          title="Placement"
+          actions={snapshot.hasMovedSlots ? (
+            <button className="btn btn--quiet" onClick={() => command('slots/reset')}>
+              Back to the template
+            </button>
+          ) : undefined}
+        >
+          <SlotNudger snapshot={snapshot} layout={layout} />
+        </Panel>
+      )}
+
       {snapshot.stripUrl && (
         <Panel
           title="Strip"
           actions={
-            <a className="btn btn--quiet" href={snapshot.stripUrl}
-               target="_blank" rel="noreferrer">Open full size</a>
+            <>
+              {snapshot.gifUrl && (
+                <a className="btn btn--quiet" href={snapshot.gifUrl}
+                   target="_blank" rel="noreferrer">GIF</a>
+              )}
+              <a className="btn btn--quiet" href={snapshot.stripUrl}
+                 target="_blank" rel="noreferrer">Open full size</a>
+            </>
           }
         >
           <div className="result">
@@ -213,6 +238,120 @@ function Delivery({
     </>
   )
 }
+
+/**
+ * Drag a photo's rectangle for this guest only.
+ *
+ * Deliberately separate from the template editor, which changes every strip from
+ * now on. This changes one: a guest too tall for the middle slot is a problem
+ * with tonight's third session, not with the template, and the two being the
+ * same control is how an operator fixes one strip and quietly breaks forty.
+ *
+ * Sent on release rather than during the drag. A PUT per pointermove would be a
+ * few hundred requests per nudge, each one broadcasting a new state to the iPad.
+ */
+function SlotNudger({
+  snapshot,
+  layout,
+}: {
+  snapshot: SessionSnapshot
+  layout: Layout
+}) {
+  const stageRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<{ slot: number; rect: SlotRect } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const slots = dragging
+    ? layout.slots.map((s, i) => (i === dragging.slot ? dragging.rect : s))
+    : layout.slots
+
+  const startDrag =
+    (i: number, mode: 'move' | 'resize') => (e: React.PointerEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+
+      const stage = stageRef.current
+      if (!stage) return
+
+      const bounds = stage.getBoundingClientRect()
+      const start = layout.slots[i]
+      const originX = e.clientX
+      const originY = e.clientY
+      let latest = start
+
+      const onMove = (ev: PointerEvent) => {
+        const dx = (ev.clientX - originX) / bounds.width
+        const dy = (ev.clientY - originY) / bounds.height
+
+        latest =
+          mode === 'move'
+            ? {
+                ...start,
+                x: clamp(start.x + dx, 0, 1 - start.w),
+                y: clamp(start.y + dy, 0, 1 - start.h),
+              }
+            : {
+                ...start,
+                w: clamp(start.w + dx, 0.02, 1 - start.x),
+                h: clamp(start.h + dy, 0.02, 1 - start.y),
+              }
+
+        setDragging({ slot: i, rect: latest })
+      }
+
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        setDragging(null)
+        void adjustSlot(i, latest).then(setError)
+      }
+
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    }
+
+  return (
+    <>
+      {error && <p className="notice notice--warn">{error}</p>}
+
+      <div
+        ref={stageRef}
+        className="nudger"
+        style={{
+          aspectRatio: `${layout.width} / ${layout.height}`,
+          background: layout.background,
+        }}
+      >
+        {slots.map((slot, i) => (
+          <div
+            key={i}
+            className="slot"
+            style={{
+              left: `${slot.x * 100}%`,
+              top: `${slot.y * 100}%`,
+              width: `${slot.w * 100}%`,
+              height: `${slot.h * 100}%`,
+            }}
+            onPointerDown={startDrag(i, 'move')}
+          >
+            {snapshot.photos[i] && (
+              <img src={photoUrl(snapshot.photos[i])} alt="" draggable={false} />
+            )}
+            <span className="slot__index">{i + 1}</span>
+            <span className="slot__handle" onPointerDown={startDrag(i, 'resize')} />
+          </div>
+        ))}
+      </div>
+
+      <p className="muted small">
+        Drag to move, or the corner to resize. This guest only — the template is
+        left alone.
+      </p>
+    </>
+  )
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 /**
  * The readout. Deliberately the largest thing on the screen: it is read from

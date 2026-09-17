@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 interface Preset {
   id: string
   label: string
-  inches: string
+  size: string
   orientation: 'Portrait' | 'Landscape'
   width: number
   height: number
@@ -244,7 +244,7 @@ export function Settings({ onChanged }: { onChanged?: () => void }) {
             {!layout.canvasPresetId && <option value="">Custom ({layout.canvas.width}×{layout.canvas.height})</option>}
             {layout.presets.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.label} — {p.inches} {p.orientation === 'Portrait' ? '↕' : '↔'}
+                {p.label} — {p.size} {p.orientation === 'Portrait' ? '↕' : '↔'}
               </option>
             ))}
           </select>

@@ -36,6 +36,34 @@ public sealed record LayoutOptions(double Margin = 0.035, double Gap = 0.03, dou
         TemplateOrientation.Portrait => new LayoutOptions(Footer: 0.22),
         _ => new LayoutOptions(Footer: 0.06),
     };
+
+    /// <summary>
+    /// Defaults for an actual canvas, which is what callers want -- the footer
+    /// that suits a 2x6 strip is wrong for the two social sizes, and orientation
+    /// alone cannot tell them apart.
+    ///
+    /// A 1:1 square is Portrait by the width-versus-height test, and a strip's
+    /// 22% footer would spend nearly a quarter of an Instagram post on branding.
+    /// A 9:16 story is portrait too but far less elongated than a 2x6, so it
+    /// wants something between the two.
+    /// </summary>
+    public static LayoutOptions For(TemplateCanvas canvas)
+    {
+        var ratio = canvas.Height / (double)canvas.Width;
+
+        return ratio switch
+        {
+            // Square-ish, give or take a nudge.
+            < 1.15 => For(SlotLayout.OrientationOf(canvas)) with { Footer = 0.10 },
+
+            // Story-shaped: 9:16 is 1.78, a 4x6 portrait is 1.5, and a 2x6 strip
+            // is 3.0. Anything under 2.2 is not a strip and should not wear a
+            // strip's footer.
+            < 2.2 => For(SlotLayout.OrientationOf(canvas)) with { Footer = 0.14 },
+
+            _ => For(SlotLayout.OrientationOf(canvas)),
+        };
+    }
 }
 
 /// <summary>
@@ -79,6 +107,43 @@ public static class SlotLayout
     }
 
     /// <summary>
+    /// Rows and columns for an actual canvas.
+    ///
+    /// A 1:1 square is Portrait by the width-versus-height test, so on
+    /// orientation alone it inherits the strip's single column -- and four photos
+    /// stacked down a square give each one a 5:1 letterbox with the tops of
+    /// everybody's heads outside it. The same is true, less severely, of a 9:16
+    /// story and a 4x6 postcard.
+    ///
+    /// So elongation decides, not orientation. Only a canvas actually shaped like
+    /// a strip gets a strip's column; anything squarer gets a balanced grid.
+    /// </summary>
+    public static (int Rows, int Columns) Grid(int photoCount, TemplateCanvas canvas)
+    {
+        var count = Math.Clamp(photoCount, MinPhotos, MaxPhotos);
+        var ratio = canvas.Height / (double)canvas.Width;
+
+        // Landscape keeps its own rules: ratio below 1 is wider than tall, where
+        // running along a row is the whole point.
+        var portrait = ratio >= 1;
+
+        // 2.2 sits between a 4x6 postcard at 1.5 and a 2x6 strip at 3.0.
+        var strippy = ratio >= 2.2;
+
+        // A square is squeezed by even two photos in a column; a taller canvas
+        // copes until there are four.
+        var threshold = ratio < 1.15 ? 2 : 4;
+
+        if (portrait && !strippy && count >= threshold)
+        {
+            var columns = (int)Math.Ceiling(Math.Sqrt(count));
+            return ((int)Math.Ceiling(count / (double)columns), columns);
+        }
+
+        return Grid(count, OrientationOf(canvas));
+    }
+
+    /// <summary>
     /// Evenly spaced slots for <paramref name="photoCount"/> photos.
     ///
     /// A final row holding fewer photos than the others is centred, so five
@@ -92,8 +157,8 @@ public static class SlotLayout
     {
         var count = Math.Clamp(photoCount, MinPhotos, MaxPhotos);
         var orientation = OrientationOf(canvas);
-        var layout = options ?? LayoutOptions.For(orientation);
-        var (rows, columns) = Grid(count, orientation);
+        var layout = options ?? LayoutOptions.For(canvas);
+        var (rows, columns) = Grid(count, canvas);
 
         // Worked in pixels, then normalised. Margins and gaps expressed directly
         // as fractions of each axis would come out visibly wider than tall on a

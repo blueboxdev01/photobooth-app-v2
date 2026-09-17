@@ -36,7 +36,13 @@ public sealed record SessionRecord(
     int ShotCount,
     string Strip,
     IReadOnlyList<string> Photos,
-    IReadOnlyList<string> SourceFiles);
+    IReadOnlyList<string> SourceFiles,
+    /// <summary>
+    /// The looping animation, when one was produced. Null is normal rather than
+    /// exceptional -- a photo that would not decode, or a build without the
+    /// encoder, costs the GIF and nothing else.
+    /// </summary>
+    string? Gif = null);
 
 /// <summary>
 /// Writes each session to its own folder on disk.
@@ -87,12 +93,17 @@ public sealed class SessionArchive(
     /// <param name="stripSource">
     /// The composed strip, typically written to a temporary path first.
     /// </param>
+    /// <param name="gifSource">
+    /// The composed animation, or null when there is not one. Optional because
+    /// it is a bonus: the session is complete without it.
+    /// </param>
     public SessionRecord Save(
         string token,
         StripTemplate template,
         IReadOnlyList<CapturedPhoto> captures,
         string stripSource,
-        DateTimeOffset createdUtc)
+        DateTimeOffset createdUtc,
+        string? gifSource = null)
     {
         var folderName = FolderName(createdUtc, token);
         var folder = Path.Combine(Root, folderName);
@@ -125,9 +136,16 @@ public sealed class SessionArchive(
         const string stripName = "strip.jpg";
         File.Copy(stripSource, Path.Combine(folder, stripName), overwrite: true);
 
+        string? gifName = null;
+        if (gifSource is not null && File.Exists(gifSource))
+        {
+            gifName = "animation.gif";
+            File.Copy(gifSource, Path.Combine(folder, gifName), overwrite: true);
+        }
+
         var record = new SessionRecord(
             token, folderName, createdUtc, template.Name, template.ShotCount,
-            stripName, photoNames, sourceNames);
+            stripName, photoNames, sourceNames, gifName);
 
         WriteRecord(folder, record);
 
@@ -192,6 +210,22 @@ public sealed class SessionArchive(
     }
 
     public string FolderFor(SessionRecord record) => Path.Combine(Root, record.FolderName);
+
+    /// <summary>
+    /// The session a guest's link refers to, or null.
+    ///
+    /// Looked up by token rather than folder so the guest-facing URL never has to
+    /// carry a folder name: the folder is dated and sequential-looking, and a
+    /// guest who notices that will try editing it.
+    ///
+    /// Compared with <see cref="StringComparison.Ordinal"/> on purpose. Tokens are
+    /// base64url and case matters -- a case-insensitive match would quietly widen
+    /// the keyspace and let one guest reach another's photos by shouting.
+    /// </summary>
+    public SessionRecord? FindByToken(string? token) =>
+        string.IsNullOrWhiteSpace(token)
+            ? null
+            : All().FirstOrDefault(r => string.Equals(r.Token, token, StringComparison.Ordinal));
 
     /// <summary>Sessions on disk, newest first. Used to re-publish after an event.</summary>
     public IReadOnlyList<SessionRecord> All()

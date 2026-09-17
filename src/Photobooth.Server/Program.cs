@@ -159,6 +159,7 @@ builder.Services.AddSingleton<FileTemplateProvider>();
 builder.Services.AddSingleton<ITemplateProvider>(
     sp => sp.GetRequiredService<FileTemplateProvider>());
 builder.Services.AddSingleton<StripCompositor>();
+builder.Services.AddSingleton<GifBuilder>();
 builder.Services.AddSingleton<SessionArchive>();
 builder.Services.AddSingleton<SessionEngine>();
 builder.Services.AddSingleton<DiagnosticsService>();
@@ -208,6 +209,18 @@ app.MapGet("/api/state", (
         session = engine.Snapshot,
         delivery = coordinator.CurrentDelivery(),
         slotAspect,
+
+        // The layout this session will actually composite with -- the operator's
+        // nudges if there are any, otherwise the template's. Sent whole rather
+        // than only when overridden, so the console has something to draw before
+        // anything has been moved.
+        layout = new
+        {
+            width = template.Canvas.Width,
+            height = template.Canvas.Height,
+            background = template.Background,
+            slots = engine.EffectiveSlots.Select(x => new { x.X, x.Y, x.W, x.H }),
+        },
 
         // Where finished sessions are written. The console showed only a folder
         // *name* after a session, which is no help in finding it -- and the
@@ -270,6 +283,22 @@ app.MapPut("/api/session/order", (SessionEngine e, ReorderRequest body) =>
         : Results.BadRequest(new { error = result.Error, snapshot = result.Snapshot });
 });
 app.MapPost("/api/session/order/reset", (SessionEngine e) => Results.Ok(e.ResetOrder()));
+
+// Move one photo's rectangle for this session only. The template on disk is
+// untouched -- a guest too tall for the middle slot is a problem with this
+// strip, not with every strip for the rest of the night.
+app.MapPut("/api/session/slots/{slot:int}", (
+    int slot, SlotRectangle body, SessionEngine engine) =>
+{
+    var result = engine.AdjustSlot(
+        slot, new TemplateSlot(body.X, body.Y, body.W, body.H));
+
+    return result.Ok
+        ? Results.Ok(result.Snapshot)
+        : Results.BadRequest(new { error = result.Error, session = result.Snapshot });
+});
+
+app.MapPost("/api/session/slots/reset", (SessionEngine e) => Results.Ok(e.ResetSlots()));
 app.MapPost("/api/session/accept", (SessionEngine e) => Results.Ok(e.Accept()));
 app.MapPost("/api/session/abort", (SessionEngine e) => Results.Ok(e.Abort("Aborted by operator.")));
 
@@ -314,6 +343,9 @@ app.MapGet("/api/sessions/{folder}/{file}", (string folder, string file, Session
     {
         ".jpg" or ".jpeg" => "image/jpeg",
         ".png" => "image/png",
+        // Served as image/gif rather than a download, so a phone animates it in
+        // the browser instead of saving a file the guest then has to go and find.
+        ".gif" => "image/gif",
         ".json" => "application/json",
         _ => "application/octet-stream",
     };
@@ -370,6 +402,10 @@ app.MapGet("/api/photos/{fileName}", (string fileName, WatchFolderCamera camera)
 });
 
 // /operator and /display are client-side views of one bundle.
+// The guest's page, on the plain-HTTP listener their phone can reach. Mapped
+// before the SPA fallback so /s/... is a real page rather than the React shell.
+app.MapDeliveryPage();
+
 app.MapFallbackToFile("index.html");
 
 // Said once, loudly, at startup. Which addresses the booth is reachable on is
@@ -418,3 +454,9 @@ app.Run();
 /// [3, 0, 1, 2, 4, 5].
 /// </param>
 internal sealed record ReorderRequest(int[]? Order);
+
+/// <summary>
+/// A slot's rectangle as the console sends it: fractions of the canvas, so the
+/// same numbers hold at any output size.
+/// </summary>
+internal sealed record SlotRectangle(double X, double Y, double W, double H);

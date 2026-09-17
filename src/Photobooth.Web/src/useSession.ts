@@ -5,7 +5,9 @@ import type {
   CameraInfo,
   CapturedPhoto,
   DeliveryUpdate,
+  Layout,
   SessionSnapshot,
+  SlotRect,
 } from './types'
 
 /**
@@ -18,6 +20,7 @@ import type {
 export function useSession() {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null)
   const [delivery, setDelivery] = useState<DeliveryUpdate | null>(null)
+  const [layout, setLayout] = useState<Layout | null>(null)
   const [camera, setCamera] = useState<CameraInfo | null>(null)
   // Where finished sessions land, so the console can say where rather than
   // naming a folder the operator then has to go hunting for.
@@ -73,6 +76,7 @@ export function useSession() {
           if (typeof body.slotAspect === 'number' && body.slotAspect > 0) {
             setSlotAspect(body.slotAspect)
           }
+          if (body.layout) setLayout(body.layout as Layout)
           if (typeof body.outputFolder === 'string') setOutputFolder(body.outputFolder)
           if (!connectionRef.current) setSnapshot(body.session)
         }
@@ -88,7 +92,7 @@ export function useSession() {
     }
   }, [])
 
-  return { snapshot, delivery, camera, connected, slotAspect, outputFolder }
+  return { snapshot, delivery, camera, connected, slotAspect, outputFolder, layout }
 }
 
 export async function command(name: string, body?: unknown) {
@@ -249,4 +253,24 @@ export function useWakeLock(active = true) {
       void held?.release().catch(() => {})
     }
   }, [active])
+}
+
+/**
+ * Move one photo's rectangle for this session only.
+ *
+ * The new state arrives over the hub like every other transition, so there is
+ * nothing to apply here -- only a reason to report when the server says no.
+ */
+export async function adjustSlot(slot: number, rect: SlotRect): Promise<string | null> {
+  try {
+    const r = await fetch(`/api/session/slots/${slot}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }),
+    })
+    if (r.ok) return null
+    return (await r.json()).error ?? `HTTP ${r.status}`
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Request failed'
+  }
 }

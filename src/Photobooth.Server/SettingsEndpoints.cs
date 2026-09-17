@@ -68,7 +68,7 @@ public static class SettingsEndpoints
                     {
                         p.Id,
                         p.Label,
-                        p.Inches,
+                        p.Size,
                         orientation = p.Orientation.ToString(),
                         p.Canvas.Width,
                         p.Canvas.Height,

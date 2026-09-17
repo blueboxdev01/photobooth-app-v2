@@ -21,6 +21,12 @@ namespace Photobooth.Core;
 /// captured in. Lets the console label a thumbnail "shot 4" after it has been
 /// dragged to the front, so the operator can see what moved where.
 /// </param>
+/// <param name="Slots">
+/// Slot rectangles for this session only, set when the operator has nudged one
+/// during review. Null means the template's own slots are in force -- which is
+/// the normal case, and is what lets the console offer "back to the template"
+/// only when there is something to go back from.
+/// </param>
 public sealed record SessionSnapshot(
     SessionState State,
     int ShotCount,
@@ -32,7 +38,14 @@ public sealed record SessionSnapshot(
     string? Message,
     string? StripUrl = null,
     string? SessionFolder = null,
-    int? RetakingSlot = null)
+    /// <summary>
+    /// The looping animation, when one was produced. Null is ordinary rather
+    /// than exceptional -- the GIF is a bonus and a session is complete without
+    /// it -- so both screens have to cope with its absence.
+    /// </summary>
+    string? GifUrl = null,
+    int? RetakingSlot = null,
+    IReadOnlyList<TemplateSlot>? Slots = null)
 {
     public int CapturedCount => Photos.Count;
 
@@ -52,6 +65,12 @@ public sealed record SessionSnapshot(
     /// to put them back.
     /// </summary>
     public bool IsReordered => Order.Where((capture, position) => capture != position).Any();
+
+    /// <summary>
+    /// True once a slot has been moved for this session, so the console can offer
+    /// to put them back.
+    /// </summary>
+    public bool HasMovedSlots => Slots is not null;
 
     public static SessionSnapshot Idle(int shotCount) =>
         new(SessionState.Idle, shotCount, [], [], null, null, null, null);

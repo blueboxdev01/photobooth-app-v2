@@ -21,6 +21,7 @@ public sealed class SessionCoordinator : IHostedService
     private readonly TimeProvider _time;
     private readonly DiagnosticsService _diagnostics;
     private readonly StripCompositor _compositor;
+    private readonly GifBuilder _gifs;
     private readonly FileTemplateProvider _templates;
     private readonly SessionArchive _archive;
     private readonly ISessionPublisher _publisher;
@@ -43,6 +44,7 @@ public sealed class SessionCoordinator : IHostedService
         TimeProvider time,
         DiagnosticsService diagnostics,
         StripCompositor compositor,
+        GifBuilder gifs,
         FileTemplateProvider templates,
         SessionArchive archive,
         ISessionPublisher publisher,
@@ -54,6 +56,7 @@ public sealed class SessionCoordinator : IHostedService
         _time = time;
         _diagnostics = diagnostics;
         _compositor = compositor;
+        _gifs = gifs;
         _templates = templates;
         _archive = archive;
         _publisher = publisher;
@@ -127,23 +130,49 @@ public sealed class SessionCoordinator : IHostedService
     private async Task ComposeAsync(SessionSnapshot snapshot)
     {
         var temp = Path.Combine(Path.GetTempPath(), $"pb-strip-{Guid.NewGuid():N}.jpg");
+        var tempGif = Path.Combine(Path.GetTempPath(), $"pb-gif-{Guid.NewGuid():N}.gif");
 
         try
         {
-            var template = _templates.Current;
+            // The session's own slots when the operator nudged any, otherwise the
+            // template's. Taken once here so the strip, the GIF and the record all
+            // describe the same layout even if something changes mid-compose.
+            var template = _templates.Current with { Slots = _engine.EffectiveSlots };
             var photos = snapshot.Photos.Select(p => p.FilePath).ToList();
 
             await Task.Run(() => _compositor.Compose(
                 template, photos, _templates.Folder, temp));
 
+            // After the strip, never before, and never allowed to fail the
+            // session: the guest's actual product is already rendered, and a
+            // missing bonus must not cost them their photos.
+            var gif = false;
+            try
+            {
+                var slot = template.Slots[0];
+                var aspect = (slot.W * template.Canvas.Width)
+                             / (slot.H * template.Canvas.Height);
+
+                gif = await Task.Run(() => _gifs.Build(photos, aspect, tempGif));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not build the GIF for this session.");
+            }
+
             var record = _archive.Save(
                 _token, template, snapshot.Photos, temp,
-                snapshot.StartedUtc ?? _time.GetUtcNow());
+                snapshot.StartedUtc ?? _time.GetUtcNow(),
+                gif ? tempGif : null);
 
             _showing = record.FolderName;
 
             _engine.CompleteComposing(
-                $"/api/sessions/{record.FolderName}/{record.Strip}", record.FolderName);
+                $"/api/sessions/{record.FolderName}/{record.Strip}",
+                record.FolderName,
+                record.Gif is null
+                    ? null
+                    : $"/api/sessions/{record.FolderName}/{record.Gif}");
 
             BroadcastDelivery(record);
         }
@@ -157,6 +186,7 @@ public sealed class SessionCoordinator : IHostedService
         finally
         {
             try { File.Delete(temp); } catch { /* best effort */ }
+            try { File.Delete(tempGif); } catch { /* best effort */ }
         }
     }
 

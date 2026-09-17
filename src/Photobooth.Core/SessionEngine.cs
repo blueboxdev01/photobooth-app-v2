@@ -40,6 +40,17 @@ public sealed class SessionEngine : IDisposable
     /// </summary>
     private int? _retakeSlot;
 
+    /// <summary>
+    /// Slot rectangles this session uses instead of the template's, when the
+    /// operator has nudged one during review.
+    ///
+    /// Per session on purpose. A guest who is taller than the frame, or a group
+    /// that will not fit the middle slot, is a problem with *this* strip -- and
+    /// silently rewriting the saved template to fix it would carry that
+    /// compromise into every guest for the rest of the night.
+    /// </summary>
+    private readonly List<TemplateSlot> _slots = [];
+
     private ITimer? _timer;
     private SessionState _state = SessionState.Idle;
     private DateTimeOffset? _countdownEnds;
@@ -47,6 +58,7 @@ public sealed class SessionEngine : IDisposable
     private DateTimeOffset? _startedUtc;
     private string? _message;
     private string? _stripUrl;
+    private string? _gifUrl;
     private string? _sessionFolder;
 
     public SessionEngine(
@@ -85,9 +97,11 @@ public sealed class SessionEngine : IDisposable
             _photos.Clear();
             _order.Clear();
             _retakeSlot = null;
+            _slots.Clear();
             _startedUtc = _time.GetUtcNow();
             _message = null;
             _stripUrl = null;
+            _gifUrl = null;
             _sessionFolder = null;
             BeginCountdown();
             snapshot = Build();
@@ -324,6 +338,105 @@ public sealed class SessionEngine : IDisposable
         return snapshot;
     }
 
+    /// <summary>
+    /// Move or resize one slot for this session only.
+    ///
+    /// Only during review: before that the set of shots is still changing, and
+    /// after Accept the strip is already being built from whatever the slots said
+    /// at the time.
+    ///
+    /// The rectangle is clamped rather than rejected. A drag that runs off the
+    /// canvas is an operator pulling a photo to the very edge, not an error worth
+    /// a dialogue -- and a slot outside the canvas composites to nothing, which
+    /// looks like a lost photo.
+    /// </summary>
+    public ReorderResult AdjustSlot(int slot, TemplateSlot rectangle)
+    {
+        SessionSnapshot snapshot;
+        lock (_sync)
+        {
+            if (_state != SessionState.ReviewShots)
+            {
+                return new ReorderResult(
+                    false, "Shots can only be moved while reviewing them.", Build());
+            }
+
+            var template = _templates.Current;
+
+            if (slot < 0 || slot >= template.Slots.Count)
+            {
+                return new ReorderResult(
+                    false, $"Pick a slot between 1 and {template.Slots.Count}.", Build());
+            }
+
+            if (_slots.Count == 0)
+            {
+                _slots.AddRange(template.Slots);
+            }
+
+            _slots[slot] = Clamp(rectangle);
+            snapshot = Build();
+        }
+
+        _logger.LogInformation("Slot {Slot} moved for this session.", slot + 1);
+        Publish(snapshot);
+        return new ReorderResult(true, null, snapshot);
+    }
+
+    /// <summary>Put the slots back to the template's, discarding this session's nudges.</summary>
+    public SessionSnapshot ResetSlots()
+    {
+        SessionSnapshot snapshot;
+        lock (_sync)
+        {
+            if (_state != SessionState.ReviewShots)
+            {
+                return Build();
+            }
+
+            _slots.Clear();
+            snapshot = Build();
+        }
+
+        _logger.LogInformation("Slots reset to the template.");
+        Publish(snapshot);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// The slots this session will actually composite with: its own if the
+    /// operator moved any, otherwise the template's.
+    /// </summary>
+    public IReadOnlyList<TemplateSlot> EffectiveSlots
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _slots.Count > 0 ? _slots.ToList() : _templates.Current.Slots;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Keeps a slot on the canvas and big enough to hold a photograph.
+    ///
+    /// The minimum matters more than it looks: a slot dragged to nothing is
+    /// indistinguishable on screen from a photo that failed to load, and the
+    /// operator would go looking for a bug in ingest.
+    /// </summary>
+    private static TemplateSlot Clamp(TemplateSlot slot)
+    {
+        const double min = 0.02;
+
+        var w = Math.Clamp(slot.W, min, 1);
+        var h = Math.Clamp(slot.H, min, 1);
+        var x = Math.Clamp(slot.X, 0, 1 - w);
+        var y = Math.Clamp(slot.Y, 0, 1 - h);
+
+        return slot with { X = x, Y = y, W = w, H = h };
+    }
+
     /// <summary>Keep waiting after a timeout, without losing the shots so far.</summary>
     public SessionSnapshot Resume()
     {
@@ -374,7 +487,8 @@ public sealed class SessionEngine : IDisposable
     }
 
     /// <summary>The strip is built and archived.</summary>
-    public SessionSnapshot CompleteComposing(string stripUrl, string sessionFolder)
+    public SessionSnapshot CompleteComposing(
+        string stripUrl, string sessionFolder, string? gifUrl = null)
     {
         SessionSnapshot snapshot;
         lock (_sync)
@@ -385,6 +499,7 @@ public sealed class SessionEngine : IDisposable
             }
 
             _stripUrl = stripUrl;
+            _gifUrl = gifUrl;
             _sessionFolder = sessionFolder;
             _state = SessionState.Done;
             snapshot = Build();
@@ -429,12 +544,14 @@ public sealed class SessionEngine : IDisposable
             _photos.Clear();
             _order.Clear();
             _retakeSlot = null;
+            _slots.Clear();
             _state = SessionState.Idle;
             _countdownEnds = null;
             _timeoutAt = null;
             _startedUtc = null;
             _message = reason;
             _stripUrl = null;
+            _gifUrl = null;
             _sessionFolder = null;
             snapshot = Build();
         }
@@ -518,7 +635,9 @@ public sealed class SessionEngine : IDisposable
         _message,
         _stripUrl,
         _sessionFolder,
-        _retakeSlot);
+        _gifUrl,
+        _retakeSlot,
+        _slots.Count > 0 ? _slots.ToList() : null);
 
     private void Publish(SessionSnapshot snapshot) => Changed?.Invoke(this, snapshot);
 

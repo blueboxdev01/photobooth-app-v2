@@ -357,8 +357,17 @@ export function Templates() {
               </label>
             </div>
             <p className="muted small">
-              {(draft.canvas.width / draft.canvas.dpi).toFixed(2)} ×{' '}
-              {(draft.canvas.height / draft.canvas.dpi).toFixed(2)} inches printed.
+              {/* Inches are only meaningful for something that could be printed.
+                  A 1080x1920 story at 72 DPI is 15x26.7in, which describes
+                  nothing anybody will ever hold. */}
+              {draft.canvas.dpi >= 200 ? (
+                <>
+                  {(draft.canvas.width / draft.canvas.dpi).toFixed(2)} ×{' '}
+                  {(draft.canvas.height / draft.canvas.dpi).toFixed(2)} inches printed.
+                </>
+              ) : (
+                <>Screen size — {draft.canvas.width} × {draft.canvas.height} px, never printed.</>
+              )}
             </p>
             <label>Background
               <input className="control control--color" type="color" value={draft.background}

@@ -27,6 +27,14 @@ export interface SessionSnapshot {
   order: number[]
   /** True once the shots have been rearranged, so the console can offer to undo it. */
   isReordered: boolean
+  /**
+   * Slot rectangles for this session only, set once the operator has nudged one.
+   * Null means the template's own slots are in force, which is the normal case
+   * and is what lets the console offer "back to the template" only when there is
+   * something to go back from.
+   */
+  slots: SlotRect[] | null
+  hasMovedSlots: boolean
   /** Absolute instants, so the browser ticks the countdown locally. */
   countdownEndsUtc: string | null
   timeoutAtUtc: string | null
@@ -41,6 +49,8 @@ export interface SessionSnapshot {
   retakingSlot: number | null
   /** Set once the strip is composed and archived. */
   stripUrl: string | null
+  /** The looping animation, when one was produced. Null is ordinary. */
+  gifUrl: string | null
   sessionFolder: string | null
 }
 
@@ -58,6 +68,25 @@ export interface DeliveryUpdate {
   url: string
   /** Relative, for the booth's own screens, which are already on that origin. */
   qrUrl: string
+}
+
+/** A photo's rectangle on the strip, in fractions of the canvas. */
+export interface SlotRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * The layout this session will composite with: the operator's nudges if there
+ * are any, otherwise the template's own slots.
+ */
+export interface Layout {
+  width: number
+  height: number
+  background: string
+  slots: SlotRect[]
 }
 
 export interface CameraInfo {
