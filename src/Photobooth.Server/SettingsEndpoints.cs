@@ -39,7 +39,9 @@ public static class SettingsEndpoints
             SessionArchive archive,
             FileTemplateProvider templates,
             IOptions<SessionSettings> session,
-            LocalPublisher publisher) =>
+            LocalPublisher publisher,
+            IOptions<NetworkOptions> network,
+            CertificateStatus certificate) =>
         {
             var current = templates.Current;
             return Results.Ok(new
@@ -81,6 +83,24 @@ public static class SettingsEndpoints
                         : "/api/settings/display-background",
                 },
 
+                // The iPad's side of the network. Separate from delivery because
+                // the failure is different: delivery going wrong sends a guest to
+                // a dead link, this going wrong means the guest screen has no
+                // camera at all and the booth cannot run.
+                booth = new
+                {
+                    hostname = network.Value.Hostname,
+                    url = string.IsNullOrWhiteSpace(network.Value.Hostname)
+                        ? null
+                        : $"https://{network.Value.Hostname}:{network.Value.BoothPort}/guest",
+                    https = certificate.Loaded,
+                    certificateSubject = certificate.Subject,
+                    certificateExpiresUtc = certificate.ExpiresUtc,
+                    certificateDaysRemaining = certificate.DaysRemaining,
+                    certificateExpiringSoon = certificate.ExpiringSoon,
+                    certificateProblem = certificate.Problem,
+                },
+
                 delivery = new
                 {
                     // Both the effective address and the detected one, so Setup
@@ -90,7 +110,7 @@ public static class SettingsEndpoints
                     // need when the QR turns out to point somewhere no phone can
                     // reach.
                     baseUrl = publisher.BaseUrl(),
-                    detected = $"http://{LocalPublisher.LocalAddress()}:{LocalPublisher.DefaultPort}",
+                    detected = publisher.Detected(),
                     overridden = store.Current.DeliveryBaseUrl,
                 },
             });

@@ -49,4 +49,12 @@ public sealed class DeliveryOptions
     /// cannot be given one, so it gets plain HTTP instead of a warning.
     /// </summary>
     public string BaseUrl { get; set; } = "";
+
+    /// <summary>
+    /// The port guests' phones connect to, used when building the fallback
+    /// address. Kept in step with the server's actual HTTP listener at startup,
+    /// because a detected address on the wrong port is exactly as dead as a
+    /// detected address on the wrong network.
+    /// </summary>
+    public int Port { get; set; } = 8080;
 }

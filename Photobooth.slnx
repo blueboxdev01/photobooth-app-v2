@@ -11,5 +11,6 @@
     <Project Path="tests/Photobooth.Core.Tests/Photobooth.Core.Tests.csproj" />
     <Project Path="tests/Photobooth.Delivery.Tests/Photobooth.Delivery.Tests.csproj" />
     <Project Path="tests/Photobooth.Imaging.Tests/Photobooth.Imaging.Tests.csproj" />
+    <Project Path="tests/Photobooth.Server.Tests/Photobooth.Server.Tests.csproj" />
   </Folder>
 </Solution>

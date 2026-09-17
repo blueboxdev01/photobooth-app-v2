@@ -25,10 +25,16 @@ public sealed class LocalPublisher(IOptions<DeliveryOptions> options) : ISession
     public string BaseUrl()
     {
         var configured = _options.BaseUrl.Trim().TrimEnd('/');
-        return configured.Length > 0 ? configured : $"http://{LocalAddress()}:{DefaultPort}";
+        return configured.Length > 0 ? configured : Detected();
     }
 
-    public const int DefaultPort = 8080;
+    /// <summary>
+    /// What the address would be with no override. Shown in Setup beside the
+    /// effective address, because it is the one thing an operator cannot look up
+    /// from inside the app and exactly what they need when the QR turns out to
+    /// point somewhere no phone can reach.
+    /// </summary>
+    public string Detected() => $"http://{LocalAddress()}:{_options.Port}";
 
     /// <summary>
     /// This machine's address on the booth network.

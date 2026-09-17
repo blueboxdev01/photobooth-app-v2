@@ -4,9 +4,11 @@
     {
       "name": "booth",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "src/Photobooth.Server", "--no-build"],
-      "port": 5282,
-      "url": "http://localhost:5282"
+      "runtimeArgs": [
+        "src/Photobooth.Server/bin/Debug/net10.0/Photobooth.Server.dll"
+      ],
+      "port": 8080,
+      "url": "http://localhost:8080"
     }
   ]
 }

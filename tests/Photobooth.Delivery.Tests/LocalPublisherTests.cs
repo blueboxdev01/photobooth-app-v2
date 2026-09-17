@@ -23,8 +23,8 @@ public sealed class LocalPublisherTests
         ["photo-1.jpg", "photo-2.jpg"],
         ["IMG_0001.JPG", "IMG_0002.JPG"]);
 
-    private static LocalPublisher With(string baseUrl) =>
-        new(Options.Create(new DeliveryOptions { BaseUrl = baseUrl }));
+    private static LocalPublisher With(string baseUrl, int port = 8080) =>
+        new(Options.Create(new DeliveryOptions { BaseUrl = baseUrl, Port = port }));
 
     [Fact]
     public void The_link_is_the_session_token_on_the_configured_origin()
@@ -55,10 +55,23 @@ public sealed class LocalPublisherTests
     [Fact]
     public void With_no_override_it_falls_back_to_the_detected_address()
     {
-        var link = With("").Publish(Record());
+        var publisher = With("");
+
+        var link = publisher.Publish(Record());
 
         Assert.StartsWith("http://", link.Url);
-        Assert.EndsWith($":{LocalPublisher.DefaultPort}/s/aB3-dEf_1", link.Url);
+        Assert.Equal($"{publisher.Detected()}/s/aB3-dEf_1", link.Url);
+    }
+
+    /// <summary>
+    /// The detected address must carry the port the server is really listening
+    /// on. A correct address on the wrong port is exactly as dead as a wrong
+    /// address, and looks just as plausible in Setup.
+    /// </summary>
+    [Fact]
+    public void The_detected_address_uses_the_configured_port()
+    {
+        Assert.EndsWith(":9000", With("", port: 9000).Detected());
     }
 
     /// <summary>

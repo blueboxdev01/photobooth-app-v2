@@ -16,11 +16,45 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = AppContext.BaseDirectory,
 });
 
-// Untracked local overrides, which is where the Google OAuth client lives. Read
-// after appsettings.json so it wins, optional so a build without one runs
-// unchanged -- which is exactly the field-test build.
+// Untracked local overrides -- the certificate password, and whatever else is
+// true of one machine and not the others. Read after appsettings.json so it
+// wins, optional so a build without one runs unchanged.
 builder.Configuration.AddJsonFile(
     "appsettings.Local.json", optional: true, reloadOnChange: false);
+
+builder.Services.Configure<NetworkOptions>(
+    builder.Configuration.GetSection(NetworkOptions.SectionName));
+
+// Kestrel is configured here rather than through the Urls setting because the
+// two endpoints are not interchangeable: one is the guest phones' plain-HTTP
+// download, the other is the iPad's secure origin, and only the second wants a
+// certificate. Urls cannot express that, and silently overrides it if set.
+var network = builder.Configuration.GetSection(NetworkOptions.SectionName)
+    .Get<NetworkOptions>() ?? new NetworkOptions();
+
+var certificate = BoothCertificate.Load(network, out var certificateStatus);
+
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    void Listen(int port, Action<Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions>? configure = null)
+    {
+        if (network.ListenOnAllInterfaces)
+        {
+            kestrel.ListenAnyIP(port, o => configure?.Invoke(o));
+        }
+        else
+        {
+            kestrel.ListenLocalhost(port, o => configure?.Invoke(o));
+        }
+    }
+
+    Listen(network.DeliveryPort);
+
+    if (certificate is not null)
+    {
+        Listen(network.BoothPort, o => o.UseHttps(certificate));
+    }
+});
 
 builder.Services.Configure<WatchFolderOptions>(
     builder.Configuration.GetSection(WatchFolderOptions.SectionName));
@@ -99,6 +133,10 @@ builder.Services.PostConfigure<ArchiveOptions>(o =>
 });
 builder.Services.PostConfigure<DeliveryOptions>(o =>
 {
+    // The detected address has to carry the port the server is actually
+    // listening on, not a second copy of the number that could drift from it.
+    o.Port = network.DeliveryPort;
+
     // The operator's override wins over configuration: which network the booth
     // is on is discovered on the day, not written into a settings file.
     if (!string.IsNullOrWhiteSpace(settingsStore.Current.DeliveryBaseUrl))
@@ -129,6 +167,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionCoordinator
 
 // Delivery is local: the files are already on disk, so publishing is only a
 // matter of deciding which URL the QR should carry.
+builder.Services.AddSingleton(certificateStatus);
 builder.Services.AddSingleton<LocalPublisher>();
 builder.Services.AddSingleton<ISessionPublisher>(sp => sp.GetRequiredService<LocalPublisher>());
 
@@ -332,6 +371,44 @@ app.MapGet("/api/photos/{fileName}", (string fileName, WatchFolderCamera camera)
 
 // /operator and /display are client-side views of one bundle.
 app.MapFallbackToFile("index.html");
+
+// Said once, loudly, at startup. Which addresses the booth is reachable on is
+// the first thing that goes wrong at an event and the last thing anyone thinks
+// to check, and the log is what a remote tester sends back.
+{
+    var scheme = network.ListenOnAllInterfaces ? "0.0.0.0" : "localhost";
+    Log.Information(
+        "Guest delivery on http://{Host}:{Port}", scheme, network.DeliveryPort);
+
+    if (certificateStatus.Loaded)
+    {
+        Log.Information(
+            "Booth screens on https://{Host}:{Port} -- certificate {Subject}, "
+            + "{Days} days left",
+            string.IsNullOrWhiteSpace(network.Hostname) ? scheme : network.Hostname,
+            network.BoothPort,
+            certificateStatus.Subject,
+            certificateStatus.DaysRemaining);
+
+        if (certificateStatus.ExpiringSoon)
+        {
+            Log.Warning(
+                "The booth certificate expires in {Days} days. Renew it before "
+                + "the next event -- the iPad stops trusting the booth the day "
+                + "it lapses.",
+                certificateStatus.DaysRemaining);
+        }
+    }
+    else
+    {
+        // Not fatal on purpose: everything except the iPad's camera still works.
+        Log.Warning(
+            "No HTTPS listener: {Problem} The operator console and guest "
+            + "delivery still work; the iPad guest screen will not be able to "
+            + "use its camera.",
+            certificateStatus.Problem);
+    }
+}
 
 app.Run();
 

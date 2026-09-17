@@ -94,7 +94,7 @@ public sealed class StripCompositor(ILogger<StripCompositor> logger)
             : new SKRect(0, 0, bitmap.Width, bitmap.Height);
 
         using var paint = new SKPaint { IsAntialias = true };
-        canvas.DrawBitmap(bitmap, source, target, paint);
+        canvas.DrawBitmap(bitmap, source, target, Sampling, paint);
     }
 
     /// <summary>
@@ -153,8 +153,25 @@ public sealed class StripCompositor(ILogger<StripCompositor> logger)
             overlay.Width, overlay.Height, template.Canvas.Width / (float)template.Canvas.Height);
 
         using var paint = new SKPaint { IsAntialias = true };
-        canvas.DrawBitmap(overlay, source, full, paint);
+        canvas.DrawBitmap(overlay, source, full, Sampling, paint);
     }
+
+    /// <summary>
+    /// How photos are resampled into their slots. Named once so the strip and
+    /// the overlay cannot drift apart and resample differently.
+    ///
+    /// Linear without mipmaps is exactly what the old DrawBitmap overload did
+    /// before it was deprecated, and it is spelled out here rather than left
+    /// implicit so that replacing the deprecated call changed no pixels -- the
+    /// golden-image test is what proves that, and it would have caught it.
+    ///
+    /// Mipmaps would likely be kinder to a 24 MP capture squeezed into a slot a
+    /// few hundred pixels wide, but that is a change to what guests take home
+    /// and belongs in its own commit with the golden image regenerated on
+    /// purpose, not smuggled in behind a deprecation fix.
+    /// </summary>
+    private static readonly SKSamplingOptions Sampling =
+        new(SKFilterMode.Linear, SKMipmapMode.None);
 
     private static SKColor ParseColour(string value) =>
         SKColor.TryParse(value, out var colour) ? colour : SKColors.White;
