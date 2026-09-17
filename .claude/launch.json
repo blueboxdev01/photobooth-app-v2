@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "booth",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/Photobooth.Server", "--no-build"],
+      "port": 5282,
+      "url": "http://localhost:5282"
+    }
+  ]
+}

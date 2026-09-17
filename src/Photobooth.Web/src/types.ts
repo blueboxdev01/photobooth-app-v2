@@ -5,7 +5,6 @@ export type SessionState =
   | 'TimedOut'
   | 'ReviewShots'
   | 'Composing'
-  | 'Uploading'
   | 'ShowQr'
   | 'Done'
 
@@ -46,23 +45,19 @@ export interface SessionSnapshot {
 }
 
 /**
- * Delivery, which is deliberately not part of the session snapshot: an upload
- * outlives the session that produced it, so `sessionFolder` says which session
- * this update is about and the screens match it against the one they are showing.
+ * Where the finished session can be collected.
+ *
+ * Still separate from the session snapshot rather than a field on it: a guest
+ * reading the QR outlasts the session it came from, because the operator can
+ * arm the next one while they are still scanning. `sessionFolder` is how a
+ * screen tells whether this is the session it is showing.
  */
 export interface DeliveryUpdate {
-  /** Uploading is switched on and a Google client is configured. */
-  enabled: boolean
-  /** A token is held. False means somebody has to press Re-authorise. */
-  authorised: boolean
-  pending: number
-  failed: number
-  lastError: string | null
-  sessionFolder: string | null
-  state: 'NotAttempted' | 'Pending' | 'Uploaded' | 'Failed' | null
-  url: string | null
-  qrUrl: string | null
-  error: string | null
+  sessionFolder: string
+  /** Absolute, for the QR. Points at this laptop on the booth network. */
+  url: string
+  /** Relative, for the booth's own screens, which are already on that origin. */
+  qrUrl: string
 }
 
 export interface CameraInfo {

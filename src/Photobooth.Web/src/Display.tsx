@@ -85,12 +85,12 @@ export function Display() {
  * How the guest takes their photos home.
  *
  * The delivery update names the session it belongs to, so this only ever shows a
- * QR for the strip beside it -- an upload still draining from an earlier guest
- * must never put someone else's code on the screen.
+ * QR for the strip beside it -- a guest still scanning from the previous session
+ * must never have someone else's code appear under them.
  *
- * When there is no link yet the strip is still shown, with an honest line about
- * why. A booth with no signal has not failed the guest: their photos exist, and
- * the operator can send the link on afterwards.
+ * The link is ready as soon as the files are on disk, so the only reason to be
+ * here without one is that the session has not finished composing. The strip is
+ * still shown, with an honest line rather than a spinner.
  */
 function Handover({
   snapshot,
@@ -104,24 +104,16 @@ function Handover({
       ? delivery
       : null
 
-  if (!mine?.enabled) {
+  if (!mine) {
     return <p className="handover__note">Ask us for your photos.</p>
   }
 
-  if (mine.qrUrl) {
-    return (
-      <div className="qr">
-        <img src={mine.qrUrl} alt="QR code linking to your photos" />
-        <p className="qr__caption">Scan to keep your photos</p>
-      </div>
-    )
-  }
-
-  if (mine.state === 'Failed') {
-    return <p className="handover__note">Ask us for your photos — we have them safe.</p>
-  }
-
-  return <p className="handover__note">Getting your link ready…</p>
+  return (
+    <div className="qr">
+      <img src={mine.qrUrl} alt="QR code linking to your photos" />
+      <p className="qr__caption">Scan to keep your photos</p>
+    </div>
+  )
 }
 
 function Overlay({ snapshot }: { snapshot: SessionSnapshot }) {

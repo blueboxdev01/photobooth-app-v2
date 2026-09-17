@@ -21,11 +21,12 @@ public sealed class ArchiveOptions
 /// <summary>
 /// What a finished session left on disk. Mirrors <c>session.json</c>.
 ///
-/// The upload fields are not just a report -- they *are* the delivery queue. A
-/// session waiting to be published is one whose <see cref="UploadState"/> says
-/// so, which means the queue needs no database of its own, cannot disagree with
-/// the archive, survives a crash without doing anything, and can be unstuck by
-/// editing a text file.
+/// Carries no delivery state. The Drive version tracked upload progress here so
+/// the record could double as the retry queue; local delivery has nothing to
+/// track, because the files are already where the guest will read them. The
+/// guest's URL is derived from <see cref="Token"/> at request time rather than
+/// stored, so a session archived behind a travel router still hands out the
+/// right link after the booth moves to a laptop hotspot.
 /// </summary>
 public sealed record SessionRecord(
     string Token,
@@ -35,26 +36,14 @@ public sealed record SessionRecord(
     int ShotCount,
     string Strip,
     IReadOnlyList<string> Photos,
-    IReadOnlyList<string> SourceFiles,
-    string UploadState = UploadStates.NotAttempted,
-    string? DriveFolderId = null,
-    string? DriveUrl = null,
-    int UploadAttempts = 0,
-    string? UploadError = null,
-    /// <summary>
-    /// The QR image, once there is a link for it to point at. Kept beside the
-    /// photos so a guest who lost their link can be shown the code again days
-    /// later, without the booth having to be running.
-    /// </summary>
-    string? Qr = null);
+    IReadOnlyList<string> SourceFiles);
 
 /// <summary>
 /// Writes each session to its own folder on disk.
 ///
-/// Local disk is the source of truth; Drive (M7) receives a copy of exactly this
-/// folder under the same name. Composing and saving locally before any upload is
-/// attempted means the session survives a revoked token, a full quota, a deleted
-/// account, or a venue with no signal.
+/// Local disk is both the source of truth and the thing guests download from,
+/// so a session survives anything the network does -- there is no second copy
+/// that could disagree with it.
 /// </summary>
 public sealed class SessionArchive(
     IOptions<ArchiveOptions> options,

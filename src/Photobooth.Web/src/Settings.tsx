@@ -33,28 +33,15 @@ interface SettingsResponse {
     backgroundImage: string | null
   }
   delivery: {
-    /** A Google OAuth client exists in this build at all. */
-    configured: boolean
-    account: string | null
-    /** The Drive folder session folders are filed inside. */
-    folderName: string
-    status: {
-      enabled: boolean
-      authorised: boolean
-      pending: number
-      failed: number
-      lastError: string | null
-      lastSuccessUtc: string | null
-    }
+    /** The origin actually being printed on QR codes right now. */
+    baseUrl: string
+    /** What auto-detection makes of the current network, override or not. */
+    detected: string
+    /** The operator's override, or null when detection is in charge. */
+    overridden: string | null
   }
 }
 
-interface FailedSession {
-  folderName: string
-  createdUtc: string
-  uploadState: string
-  uploadError: string | null
-}
 
 interface FolderCheck {
   path: string
@@ -92,7 +79,6 @@ export function Settings({ onChanged }: { onChanged?: () => void }) {
   const [presetId, setPresetId] = useState('')
   const [colour, setColour] = useState('#14161A')
   const [check, setCheck] = useState<{ which: 'watch' | 'output'; result: FolderCheck } | null>(null)
-  const [stuck, setStuck] = useState<FailedSession[]>([])
   const [status, setStatus] = useState<Status>(null)
   const [busy, setBusy] = useState(false)
 
@@ -110,13 +96,6 @@ export function Settings({ onChanged }: { onChanged?: () => void }) {
     setPhotoCount(body.layout.photoCount)
     setPresetId(body.layout.canvasPresetId ?? '')
     setColour(body.display.backgroundColor)
-
-    const sessions = await fetch('/api/sessions')
-    if (sessions.ok) {
-      const all = await sessions.json()
-      setStuck(
-        (all.sessions as FailedSession[]).filter((x) => x.uploadState === 'Failed'))
-    }
   }, [])
 
   useEffect(() => { void load() }, [load])
@@ -358,8 +337,7 @@ export function Settings({ onChanged }: { onChanged?: () => void }) {
         </p>
       </div>
 
-      <Delivery data={data} busy={busy} setBusy={setBusy} setStatus={setStatus}
-                stuck={stuck} reload={load} save={save} />
+      <Delivery data={data} busy={busy} save={save} />
 
       <div className="settings__group">
         <h3>Timings</h3>
@@ -398,151 +376,70 @@ export function Settings({ onChanged }: { onChanged?: () => void }) {
 }
 
 /**
- * Google Drive delivery.
+ * Where guests are sent to collect their photos.
  *
- * Three things an operator has to be able to see at a glance, because each one
- * silently stops guests getting their photos: whether uploading is on, whether
- * the booth is still signed in, and whether anything has given up.
+ * The one setting here that matters is the address, and it matters because it
+ * fails invisibly: a wrong origin still produces a perfectly scannable QR. The
+ * booth moves between a travel router, a laptop hotspot and venue wifi, and only
+ * the operator knows which -- so detection is shown next to the override rather
+ * than hidden behind it.
  */
 function Delivery({
   data,
   busy,
-  setBusy,
-  setStatus,
-  stuck,
-  reload,
   save,
 }: {
   data: SettingsResponse
   busy: boolean
-  setBusy: (b: boolean) => void
-  setStatus: (s: Status) => void
-  stuck: FailedSession[]
-  reload: () => Promise<void>
   save: (patch: Record<string, unknown>, success: string) => Promise<boolean>
 }) {
-  const { configured, account, status, folderName } = data.delivery
-  const [folder, setFolder] = useState(folderName)
+  const { baseUrl, detected, overridden } = data.delivery
+  const [value, setValue] = useState(overridden ?? '')
 
-  const post = async (url: string, success: string) => {
-    setBusy(true)
-    try {
-      const r = await fetch(url, { method: 'POST' })
-      const body = await r.json()
-      if (!r.ok) {
-        setStatus({ ok: false, text: body.error ?? `HTTP ${r.status}` })
-        return
-      }
-      setStatus({ ok: true, text: success })
-      await reload()
-    } finally {
-      setBusy(false)
-    }
-  }
+  const unreachable = baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost')
 
   return (
     <div className="settings__group">
       <h3>Guest delivery</h3>
 
-      {!configured ? (
-        <p className="muted small">
-          This build has no Google account set up, so finished sessions stay in the
-          output folder and nothing is uploaded. That is the right setting for
-          field testing. To turn it on, follow <code>docs/DRIVE-SETUP.md</code> and
-          put the OAuth client in <code>appsettings.Local.json</code>.
+      {unreachable && (
+        <p className="banner">
+          This address only works on this machine, so no guest phone can reach it.
+          Check the booth is on a network, or set the address by hand below.
         </p>
-      ) : (
-        <>
-          {status.enabled && !status.authorised && (
-            <p className="banner">
-              Not signed in — nothing is being uploaded. Press Re-authorise.
-            </p>
-          )}
-
-          <div className="controls">
-            <button className="btn btn--primary" disabled={busy}
-                    onClick={() => void save(
-                      { driveEnabled: !status.enabled },
-                      status.enabled ? 'Uploading switched off.' : 'Uploading switched on.')}>
-              {status.enabled ? 'Turn uploading off' : 'Turn uploading on'}
-            </button>
-            <button className="btn" disabled={busy}
-                    onClick={() => void post('/api/delivery/authorize', 'Signed in to Google Drive.')}>
-              {status.authorised ? 'Re-authorise' : 'Sign in'}
-            </button>
-            {status.authorised && (
-              <button className="btn" disabled={busy}
-                      onClick={() => void post('/api/delivery/sign-out', 'Signed out.')}>
-                Sign out
-              </button>
-            )}
-          </div>
-
-          <label>Drive folder
-            <input className="control" value={folder} spellCheck={false}
-                   onChange={(e) => setFolder(e.target.value)} />
-          </label>
-          <div className="controls">
-            <button className="btn" disabled={busy || folder.trim() === folderName}
-                    onClick={() => void save(
-                      { driveFolderName: folder.trim() }, 'Drive folder applied.')}>
-              Save folder
-            </button>
-          </div>
-          <p className="muted small">
-            Every session folder is filed inside this one, so the booth account&rsquo;s
-            Drive stays tidy. The app creates it — it has to be a folder the app
-            made, because it can only see its own files, so pointing it at a folder
-            you made by hand in Drive will not work.
-          </p>
-
-          <dl className="facts">
-            <dt>Uploading</dt>
-            <dd>{status.enabled ? 'On' : 'Off'}</dd>
-            <dt>Account</dt>
-            <dd>{account ?? (status.authorised ? 'signed in' : 'not signed in')}</dd>
-            <dt>Waiting</dt>
-            <dd>{status.pending} session{status.pending === 1 ? '' : 's'}</dd>
-            {status.lastError && (
-              <>
-                <dt>Last error</dt>
-                <dd className="bad">{status.lastError}</dd>
-              </>
-            )}
-          </dl>
-
-          <p className="muted small">
-            Each session becomes its own Drive folder, shared by link, and the QR
-            points at it — so a guest sees their own photos and nobody else’s.
-            Uploads happen in the background: the guest never waits on the network,
-            and a session captured with no signal keeps its photos and gets its
-            link when the connection comes back.
-          </p>
-        </>
       )}
 
-      {stuck.length > 0 && (
-        <>
-          <p className="banner">
-            {stuck.length} session{stuck.length === 1 ? '' : 's'} gave up. The photos
-            are safe in the output folder.
-          </p>
-          <ul className="slotlist">
-            {stuck.map((s) => (
-              <li key={s.folderName}>
-                <code>{s.folderName}</code>
-                <span className="muted small">{s.uploadError}</span>
-                <button className="btn" disabled={busy}
-                        onClick={() => void post(
-                          `/api/delivery/republish/${s.folderName}`,
-                          `${s.folderName} queued again.`)}>
-                  Try again
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      <dl className="facts">
+        <dt>Guest link</dt>
+        <dd><code>{baseUrl}/s/&hellip;</code></dd>
+        <dt>Detected</dt>
+        <dd className="muted">{detected}</dd>
+      </dl>
+
+      <label>Address override
+        <input className="control" value={value} spellCheck={false}
+               placeholder={detected}
+               onChange={(e) => setValue(e.target.value)} />
+      </label>
+      <div className="controls">
+        <button className="btn" disabled={busy || value.trim() === (overridden ?? '')}
+                onClick={() => void save(
+                  { deliveryBaseUrl: value.trim() },
+                  value.trim() ? 'Delivery address applied.' : 'Back to auto-detection.')}>
+          Save address
+        </button>
+      </div>
+      <p className="muted small">
+        Leave it empty to use whichever network the booth is on. Set it when this
+        laptop has more than one address — a VPN or a virtual switch will happily
+        offer one no phone can reach.
+      </p>
+
+      <p className="muted small">
+        Photos stay on this machine. Each session gets its own unguessable link,
+        so a guest sees their own photos and nobody else&rsquo;s, and nothing is
+        uploaded anywhere.
+      </p>
     </div>
   )
 }

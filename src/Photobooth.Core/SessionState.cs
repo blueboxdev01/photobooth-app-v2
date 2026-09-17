@@ -5,9 +5,9 @@ namespace Photobooth.Core;
 ///
 /// Note what is missing: there is no "selecting" state. Every photo captured
 /// goes on the strip, and the template's slot count decides how many that is.
-/// Composing, Uploading and ShowQr are declared here but not yet reachable --
-/// they are wired up in later milestones and listed now so the shape of the
-/// flow is visible in one place.
+/// There is also no "uploading" state. Delivery is local: the files are on disk
+/// before the session ends, so there is never a moment where a guest is waiting
+/// on a transfer.
 /// </summary>
 public enum SessionState
 {
@@ -37,10 +37,7 @@ public enum SessionState
     /// <summary>Building the strip. Wired up in M4.</summary>
     Composing,
 
-    /// <summary>Uploading to Drive. Wired up in M7.</summary>
-    Uploading,
-
-    /// <summary>QR on the guest screen. Wired up in M7.</summary>
+    /// <summary>QR on the guest screen.</summary>
     ShowQr,
 
     /// <summary>Finished. Returns to Idle when the operator starts the next guest.</summary>

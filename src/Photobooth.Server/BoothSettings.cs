@@ -51,19 +51,14 @@ public sealed class BoothSettings
     // --- delivery ---
 
     /// <summary>
-    /// Whether finished sessions are uploaded to Google Drive.
+    /// The origin printed on the guest's QR, overriding auto-detection.
     ///
-    /// Only ever narrows what configuration allows: with no OAuth client
-    /// configured, as in the field-test build, there is nothing to turn on.
+    /// Null means "work it out from the active network adapter", which is right
+    /// nearly always. The override exists for the cases detection cannot get
+    /// right on its own: a laptop with a VPN or a virtual switch up, or a booth
+    /// reached through something other than its own address.
     /// </summary>
-    public bool? DriveEnabled { get; set; }
-
-    /// <summary>
-    /// The Drive folder every session folder is filed inside. The app creates it
-    /// if it is not there; it must be one the app made, because the drive.file
-    /// scope cannot write into a folder someone created by hand.
-    /// </summary>
-    public string? DriveFolderName { get; set; }
+    public string? DeliveryBaseUrl { get; set; }
 
     // --- guest display ---
 

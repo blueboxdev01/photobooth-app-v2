@@ -49,8 +49,9 @@ it.
 > You no longer need to make EOS Utility save anywhere in particular — point the
 > app at wherever it already saves.
 
-> **Nothing uploads anywhere.** Google Drive is not in this build. Photos stay in
-> the `data` folder next to the .exe.
+> **Nothing uploads anywhere.** Delivery is local by design — there is no cloud
+> path in this build at all. Photos stay in the `data` folder next to the .exe,
+> and guests download them straight off this machine over the booth network.
 
 ---
 

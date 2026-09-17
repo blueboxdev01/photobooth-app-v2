@@ -61,10 +61,10 @@ export function useSession() {
         const body = await r.json()
         if (!cancelled) {
           setCamera(body.camera)
-          // Delivery is polled as well as pushed: an upload can settle while no
-          // browser is connected, and the pending count on the console would
-          // otherwise sit stale until the next session.
-          setDelivery(body.delivery)
+          // Polled as well as pushed, so a screen that connects mid-session --
+          // or reloads while the QR is up -- still learns where to point the
+          // guest instead of waiting for the next push that may never come.
+          setDelivery(body.delivery ?? null)
           if (typeof body.slotAspect === 'number' && body.slotAspect > 0) {
             setSlotAspect(body.slotAspect)
           }

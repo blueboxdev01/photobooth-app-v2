@@ -57,8 +57,8 @@ public sealed class SessionArchiveTests : IDisposable
 
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
-        // Hammer it from both sides, as the console polling and an upload
-        // finishing would.
+        // Hammer it from both sides, as the console polling and a session being
+        // rewritten would.
         var readers = Enumerable.Range(0, 3).Select(_ => Task.Run(() =>
         {
             while (!stop.IsCancellationRequested)
@@ -72,7 +72,7 @@ public sealed class SessionArchiveTests : IDisposable
         {
             while (!stop.IsCancellationRequested)
             {
-                _archive.WriteRecord(folder, record with { UploadAttempts = ++writes });
+                _archive.WriteRecord(folder, record with { ShotCount = ++writes });
             }
         });
 
@@ -80,7 +80,7 @@ public sealed class SessionArchiveTests : IDisposable
         await Task.WhenAll([writer, .. readers]);
 
         Assert.True(writes > 0, "the writer never ran");
-        Assert.Equal(UploadStates.NotAttempted, _archive.All().Single().UploadState);
+        Assert.Equal(writes, _archive.All().Single().ShotCount);
     }
 
     /// <summary>A reader must never catch the file mid-write and skip the session.</summary>
@@ -99,7 +99,9 @@ public sealed class SessionArchiveTests : IDisposable
             {
                 _archive.WriteRecord(
                     folder,
-                    record with { UploadError = new string('x', 500 + (n++ % 400)) });
+                    // Varying length on purpose: a fixed-size record could be
+                    // replaced atomically by luck rather than by the move.
+                    record with { Template = new string('x', 500 + (n++ % 400)) });
             }
         });
 
@@ -126,9 +128,9 @@ public sealed class SessionArchiveTests : IDisposable
         var record = Save();
         var folder = _archive.FolderFor(record);
 
-        _archive.WriteRecord(folder, record with { UploadState = UploadStates.Uploaded });
+        _archive.WriteRecord(folder, record with { Template = "rewritten" });
 
         Assert.Empty(Directory.EnumerateFiles(folder, "*.tmp"));
-        Assert.Equal(UploadStates.Uploaded, _archive.All().Single().UploadState);
+        Assert.Equal("rewritten", _archive.All().Single().Template);
     }
 }

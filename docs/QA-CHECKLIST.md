@@ -169,7 +169,6 @@ put a wrong photo on a strip.
 
 - [ ] Its own folder, named by date and time
 - [ ] `strip.jpg`, one `photo-N.jpg` per shot, `session.json`
-- [ ] `qr.png` *(only if Drive is on)*
 - [ ] The originals are **still in the watch folder**, untouched
 
 ---
@@ -200,31 +199,28 @@ measured against the R50's. Verify it honestly:
 
 ## Section 9 — Delivery and the QR
 
-Skip if you are running without Google Drive.
-
 **Setup → Guest delivery**
 
-- [ ] Account shown is the **booth** account, not a personal one
-- [ ] Consent screen is **In production**, not Testing — otherwise the sign-in dies after 7 days, mid-event
-- [ ] Uploading: On
+- [ ] **Guest link** shows the address of the booth network, not `127.0.0.1` or `localhost`
+- [ ] **Detected** matches what the laptop actually has — check against `ipconfig`
+- [ ] If the laptop has a VPN or virtual switch up, confirm detection did **not** pick it
 
 **A session**
 
-- [ ] QR appears on the guest screen; time it — seconds, not tens of seconds
-- [ ] **Scan it from a phone on mobile data, not the venue wifi**
-- [ ] The folder holds the strip, the raws, and `qr.png`
+- [ ] QR appears on the guest screen as soon as the strip is composed — no waiting
+- [ ] **Scan it from a phone that has never joined this network before**
+- [ ] The page offers the strip, the raws, and the GIF
 - [ ] A second session gives a **different** link showing different photos
-- [ ] In Drive, sessions sit inside the one `Photobooth` folder
-- [ ] `qr.png` in the folder scans to that same session
+- [ ] Editing the token in the URL reaches **nothing**, not somebody else's session
 
 **When it breaks**
 
 | Do this | Expected | ✓ |
 |---|---|---|
-| Turn wifi off mid-upload | Session completes, marked waiting, drains on reconnect | ☐ |
-| Run a session fully offline | Completes; photos intact; publishes later from Setup | ☐ |
-| Close the app mid-upload, reopen | Picks up where it left off, no duplicate files in Drive | ☐ |
-| Sign out, run a session | Loud banner; photos safe; **Try again** works after signing in | ☐ |
+| Unplug the booth network mid-session | Session completes; photos intact; link works again when it is back | ☐ |
+| Move the booth to a different network | Detection follows it; the QR carries the new address | ☐ |
+| Set a deliberately wrong override | Operator screen warns; clearing it returns to detection | ☐ |
+| Phone left on cellular, not the booth wifi | Link does not resolve — confirm the guest instructions cover this | ☐ |
 
 ---
 
@@ -236,17 +232,16 @@ The one that finds what single sessions never do.
 - [ ] Memory does not climb session over session
 - [ ] Camera does not overheat or drop off USB
 - [ ] Every session produced a complete folder
-- [ ] All uploads drained to zero waiting
 - [ ] Disk space still healthy
 
 ---
 
 ## Section 11 — Data and privacy
 
-- [ ] Guest photos exist in **two** places — this laptop and the Drive account. You are content with both
-- [ ] Drive folders are "anyone with the link" — a forwarded link works for whoever holds it
+- [ ] Guest photos exist in **one** place — this laptop. There is no cloud copy, so the laptop is the only thing to back up and the only thing to protect
+- [ ] Session links are "anyone with the link, on this network" — a forwarded link works for whoever holds it, while the booth is running
 - [ ] No guest names in folder names
-- [ ] You have a retention period in mind, covering the laptop, Drive, and any backup
+- [ ] You have a retention period in mind, covering the laptop and any backup
 - [ ] **Setup → Download diagnostics bundle** — confirm it contains **no photographs** and no credentials
 
 ---
@@ -272,9 +267,9 @@ Things that will happen at an event.
 Only if you are moving off an older build.
 
 - [ ] Unzipped **alongside** the old folder, not over it
-- [ ] `data/` copied across — past sessions, settings, Drive sign-in
+- [ ] `data/` copied across — past sessions and settings
 - [ ] `templates/` copied across
-- [ ] Old sessions still listed, old Drive links still open
+- [ ] Old sessions still listed, and their links still open
 - [ ] Version at the foot of the rail is the one you meant to run
 
 ---

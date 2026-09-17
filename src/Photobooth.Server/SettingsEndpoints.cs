@@ -20,8 +20,7 @@ public sealed record SettingsUpdate(
     string? CanvasPresetId,
     string? DisplayBackgroundColor,
     bool? ClearDisplayBackgroundImage,
-    bool? DriveEnabled,
-    string? DriveFolderName);
+    string? DeliveryBaseUrl);
 
 /// <summary>
 /// Everything an operator sets up per event: where the camera's photos arrive,
@@ -40,9 +39,7 @@ public static class SettingsEndpoints
             SessionArchive archive,
             FileTemplateProvider templates,
             IOptions<SessionSettings> session,
-            IOptions<DriveOptions> drive,
-            DriveAuth driveAuth,
-            UploadQueue uploads) =>
+            LocalPublisher publisher) =>
         {
             var current = templates.Current;
             return Results.Ok(new
@@ -86,14 +83,15 @@ public static class SettingsEndpoints
 
                 delivery = new
                 {
-                    // Configured says a Google client exists in this build at
-                    // all. The field-test build has none, so the whole section
-                    // shows as unavailable rather than as a switch that does
-                    // nothing when pressed.
-                    configured = driveAuth.Configured,
-                    account = driveAuth.Account,
-                    folderName = drive.Value.ParentFolderName,
-                    status = uploads.Status(),
+                    // Both the effective address and the detected one, so Setup
+                    // can show the override alongside what it would fall back to.
+                    // The detected address is the one thing an operator cannot
+                    // look up from inside the app, and it is exactly what they
+                    // need when the QR turns out to point somewhere no phone can
+                    // reach.
+                    baseUrl = publisher.BaseUrl(),
+                    detected = $"http://{LocalPublisher.LocalAddress()}:{LocalPublisher.DefaultPort}",
+                    overridden = store.Current.DeliveryBaseUrl,
                 },
             });
         });
@@ -106,8 +104,7 @@ public static class SettingsEndpoints
             FileTemplateProvider templates,
             IOptions<ArchiveOptions> archiveOptions,
             IOptions<SessionSettings> session,
-            IOptions<DriveOptions> driveOptions,
-            DrivePublisher publisher) =>
+            IOptions<DeliveryOptions> deliveryOptions) =>
         {
             // Staged on a copy and validated in full before anything is applied.
             // Mutating the live settings as we went meant a rejected request could
@@ -175,30 +172,33 @@ public static class SettingsEndpoints
                 settings.NoPhotoTimeoutSeconds = timeout;
             }
 
-            if (update.DriveEnabled is { } driveEnabled)
+            if (update.DeliveryBaseUrl is { } baseUrl)
             {
-                settings.DriveEnabled = driveEnabled;
-            }
+                var trimmed = baseUrl.Trim().TrimEnd('/');
 
-            if (update.DriveFolderName is { } driveFolder)
-            {
-                var trimmed = driveFolder.Trim();
-
-                // Drive itself allows almost anything, but a name with a slash or
-                // a control character in it reads as a path and confuses everyone
-                // looking at the folder later.
-                if (trimmed.Length is 0 or > 100
-                    || trimmed.IndexOfAny(['/', '\\']) >= 0
-                    || trimmed.Any(char.IsControl))
+                // Empty clears the override and goes back to auto-detection, which
+                // is the only way out once a wrong address has been saved.
+                if (trimmed.Length == 0)
                 {
+                    settings.DeliveryBaseUrl = null;
+                }
+                else if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var parsed)
+                         || (parsed.Scheme != Uri.UriSchemeHttp
+                             && parsed.Scheme != Uri.UriSchemeHttps))
+                {
+                    // Validated here rather than at the QR, because a bad address
+                    // is invisible until a guest cannot reach their photos -- by
+                    // which point they have gone.
                     return Results.BadRequest(new
                     {
-                        error = "The Drive folder name must be 1-100 characters "
-                                + "and cannot contain slashes.",
+                        error = "The delivery address must be a full URL, "
+                                + "such as http://192.168.8.2:8080.",
                     });
                 }
-
-                settings.DriveFolderName = trimmed;
+                else
+                {
+                    settings.DeliveryBaseUrl = trimmed;
+                }
             }
 
             if (update.DisplayBackgroundColor is { } colour)
@@ -246,18 +246,9 @@ public static class SettingsEndpoints
                 session.Value.NoPhotoTimeoutSeconds = appliedTimeout;
             }
 
-            if (settings.DriveEnabled is { } appliedDrive)
-            {
-                // Immediate, like the folders: nobody should have to restart the
-                // booth to stop it uploading.
-                driveOptions.Value.Enabled = appliedDrive;
-            }
-
-            if (!string.IsNullOrWhiteSpace(settings.DriveFolderName))
-            {
-                driveOptions.Value.ParentFolderName = settings.DriveFolderName!;
-                publisher.ForgetParentFolder();
-            }
+            // Immediate, like the folders: nobody should have to restart the booth
+            // after discovering the QR points at the wrong network.
+            deliveryOptions.Value.BaseUrl = settings.DeliveryBaseUrl ?? "";
 
             if (update.ClearDisplayBackgroundImage == true)
             {

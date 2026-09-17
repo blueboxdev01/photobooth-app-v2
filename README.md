@@ -1,12 +1,18 @@
-# Photobooth App
+# Self Photobooth
 
-Photobooth software for a **Canon EOS R50**: EOS Utility saves tethered captures
-into a watch folder, this app ingests them, composites a 2×6 strip, and delivers
-the session to the guest as a QR code.
+Photobooth software for a **Canon EOS R50**, producing digital-only products:
+EOS Utility saves tethered captures into a watch folder, this app ingests them,
+composites a strip, and hands the guest a QR code they scan on the booth's own
+network. Nothing is uploaded anywhere.
 
 **The app never talks to the camera.** Its only interface is a folder with JPEGs
 in it — EOS Utility sits upstream, and the camera upstream of that. That is what
 lets the whole thing be built and tested with no camera present.
+
+Forked from [`blueboxdev01/photobooth-app`](https://github.com/blueboxdev01/photobooth-app),
+which delivered to Google Drive and used a laptop webcam for the posing mirror.
+This version replaces both: delivery is local, and the guest screen is an iPad
+using its own camera.
 
 See [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md) for the full plan.
 
@@ -14,63 +20,54 @@ See [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md) for the full plan
 
 | Milestone | State |
 |---|---|
-| M1 Watch-folder ingest | done |
-| M2 Session engine, two-window flow, posing mirror | done |
-| M3 Ingest hardening | done — 12 tests, one per failure mode |
-| M4 Compositor + 2×6 strip + local archive | done — golden-image tested |
-| **M5 Field-test build** | **done — this is what your colleague runs** |
-| M6 Remote hardware bring-up | waiting on the camera |
-| M7 Google Drive delivery + QR | done — off by default, see [docs/DRIVE-SETUP.md](docs/DRIVE-SETUP.md) |
-| M8 Frame upload + slot editor | done — `/templates` |
-| Operator console | done — dashboard, light/dark, layout and folder settings |
+| **M1 Repo bring-up, Drive removed, local delivery** | **done** |
+| M2 HTTPS, hostname and the network layer | next |
+| M3 The iPad guest screen | |
+| M4 Frame-guide calibration | |
+| M5 Shutter automation | |
+| M6 Sizes, per-session nudge, GIF | |
+| M7 Local delivery page | |
+| M8 UI polish | |
 
-181 tests passing. Nothing has yet been verified against a real camera.
+Inherited and still working: watch-folder ingest, the session engine, the
+compositor and golden-image tests, per-shot retake, drag reordering, the frame
+and slot editor, and the operator console.
+
+146 tests passing. Nothing has yet been verified against a real camera.
 
 Each session writes `data/sessions/<name>/` holding the strip, the raw photos,
-and a `session.json` describing them. The Drive folder receives a copy of exactly
-that folder under the same name.
+and a `session.json` describing them. That folder is both the archive and what
+the guest downloads from — there is no second copy anywhere that could disagree
+with it.
 
 ## Guest delivery
 
-Each finished session becomes **its own Google Drive folder**, shared by link,
-and the guest screen shows a QR pointing at it. They scan it and get their own
-photos — there is no gallery, and no id to edit to reach anyone else's session.
+Delivery is **local**. The photos never leave this laptop: the booth runs a small
+web server, the guest's phone joins the same network, and the QR points at an
+address on that network.
 
-**Off unless you set it up.** With no Google account configured — which is how
-the field-test build ships — sessions are saved to the output folder and the
-guest screen says to ask for them. Turning it on is
-**[docs/DRIVE-SETUP.md](docs/DRIVE-SETUP.md)**, about fifteen minutes.
+Each finished session gets its **own unguessable token**, so a guest reaches
+their own photos and nobody else's — there is no gallery, and no id to edit.
 
-**The guest never waits on the network.** The strip is composed and everything is
-written to disk *before* an upload is attempted, so a venue with no signal costs
-a guest their QR code and nothing else. Uploads run in the background and retry
-with a widening gap; a session that never uploaded can be published from Setup
-days later.
+**There is nothing to wait for.** The files are on disk before the session ends,
+so the link is ready the instant the strip is composed. No upload, no queue, no
+retry, no sign-in that can expire mid-event. That is the whole reason the Drive
+path was removed rather than switched off.
 
-Sessions are filed **one folder per guest, inside a single parent folder** the
-app creates — `Photobooth` by default, renameable in Setup. If they look loose,
-that is Drive's **Home** tab listing recent files flat; **My Drive** shows the
-folders.
+**The address is the one thing that fails silently.** A wrong origin still
+renders a perfectly scannable QR, and nobody finds out until a guest scans it and
+gets nothing. So the booth detects its own address, shows it in **Setup** next to
+the override, and warns on the operator screen if it has resolved to something
+only this machine can reach.
 
-A **`qr.png`** is written into each session's folder — on disk and in Drive —
-once there is a link for it to point at. A guest who comes back next week having
-lost their link can be found from the folder alone, with no need for the booth to
-be running.
+Detection picks the adapter that has a gateway, because a laptop at an event
+routinely also has a VPN adapter and a virtual switch, and either will happily
+offer an address no phone can dial. Override it in Setup when detection guesses
+wrong — the change applies immediately, no restart.
 
-**The QR appears before the upload finishes.** The strip goes up first and the
-link is published the moment it lands, while the raw photos -- which are most of
-the ~25 MB -- are still going. Waiting for the whole session would routinely put
-the code on screen after the guest had walked away, which is the same as no code.
-A guest who scans early sees their strip and watches the rest arrive.
-
-There is no upload database. The queue **is** the archive — the work is every
-session whose `session.json` says it has not been published yet. So it survives
-being killed mid-upload with no recovery code, cannot disagree with what is
-actually on disk, and a stuck session can be unstuck in Notepad.
-
-Failures are told apart, because retrying does not fix all of them equally: a
-dropped network is retried, a revoked sign-in or a full account is not, and both
-say so on the operator screen rather than stalling quietly.
+The QR is **rendered on demand**, not saved beside the photos. The booth's
+address changes with the network it is plugged into, and a stored code would go
+on confidently pointing at the address of the last event.
 
 ## Retaking one shot
 
@@ -109,13 +106,19 @@ and after Accept the strip is already being built.
 
 | | Capture | Preview |
 |---|---|---|
-| Device | Canon EOS R50 | any webcam |
-| Reaches the app as | JPEGs in a watch folder | a browser video stream |
-| Triggered by | a physical BR-E1 remote | n/a |
-| App can trigger it? | **no** | n/a |
+| Device | Canon EOS R50 | the iPad's own front camera |
+| Reaches the app as | JPEGs in a watch folder | a stream inside the guest page |
+| Triggered by | a remote, or the app driving EOS Utility (M5) | n/a |
+| App can trigger it? | not directly — see M5 | n/a |
 
-The app cannot fire the shutter, so a photo *arrives* as an event rather than
-being requested. Everything downstream is built around that.
+The app cannot fire the shutter over the USB cable, because EOS Utility owns it.
+A photo therefore *arrives* as an event rather than being requested, and
+everything downstream is built around that.
+
+The same exclusivity is why the iPad uses its own camera rather than the R50's
+live view: EOS Utility holds that too. The cost is that the two cameras do not
+see the same thing, which is what the frame-guide calibration in M4 exists to
+correct.
 
 ## Running it
 
@@ -136,6 +139,7 @@ Then open:
 |---|---|
 | <http://localhost:5000/operator> | controls — on your laptop |
 | <http://localhost:5000/display> | guest screen — fullscreen on the monitor |
+| <http://localhost:5000/guest> | the iPad guest screen (M3) |
 | <http://localhost:5000/templates> | frame upload and the slot editor |
 | <http://localhost:5000/diagnostics> | booth setup, and what the app is seeing |
 
@@ -154,7 +158,7 @@ does a press become a strip) and ends in a go/no-go.
 ## Field testing
 
 See **[docs/FIELD-TEST.md](docs/FIELD-TEST.md)**. The short version: the build
-runs standalone, uploads nothing, and `/diagnostics` reports what the app saw,
+runs standalone, and `/diagnostics` reports what the app saw,
 what it rejected and why, and exactly which commit produced the answer.
 
 ## Template art
@@ -250,6 +254,6 @@ git tag v0.5.0 && git push origin v0.5.0
 
 ## Repo hygiene
 
-`data/` holds guest photos and is never committed. Secrets live in untracked
-`appsettings.Local.json`; only `appsettings.example.json` is tracked. The
-diagnostics bundle deliberately excludes photographs.
+`data/` holds guest photos and is never committed. Local overrides live in
+untracked `appsettings.Local.json`; only `appsettings.example.json` is tracked.
+The diagnostics bundle deliberately excludes photographs.

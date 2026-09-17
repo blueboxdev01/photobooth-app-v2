@@ -19,7 +19,6 @@ const HEADLINE: Record<SessionState, string> = {
   TimedOut: 'No photo arrived',
   ReviewShots: 'All shots are in',
   Composing: 'Building the strip',
-  Uploading: 'Uploading',
   ShowQr: 'Showing the QR code',
   Done: 'Session complete',
 }
@@ -139,7 +138,7 @@ export function Operator() {
                 {/* The full path, not just the folder name. "Saved to
                     2026-09-13_2102_eylvz8" tells you nothing about where. */}
                 <code className="path">
-                  {outputFolder ? `${outputFolder}\${snapshot.sessionFolder}` : snapshot.sessionFolder}
+                  {outputFolder ? `${outputFolder}\\${snapshot.sessionFolder}` : snapshot.sessionFolder}
                 </code>
               </dd>
               <dt>Contents</dt>
@@ -162,33 +161,27 @@ export function Operator() {
 /**
  * Delivery trouble, at the top where the operator will see it.
  *
- * Only for the two things a person has to act on. A pending upload is normal and
- * says so further down; a revoked sign-in or a full account stops every guest
- * from here on, and failing quietly is how you find out at the end of the night.
+ * Local delivery cannot fail the way an upload could -- there is no sign-in to
+ * revoke and no quota to exhaust -- but it can still point somewhere no phone
+ * can reach, which looks identical from behind the booth. A loopback address is
+ * the one case detection gets wrong silently, and it means every QR of the night
+ * is dead.
  */
 function DeliveryNotice({ delivery }: { delivery: DeliveryUpdate | null }) {
-  if (!delivery?.enabled) return null
+  if (!delivery) return null
 
-  if (!delivery.authorised) {
-    return (
-      <p className="notice notice--warn">
-        Not signed in to Google Drive — nothing is being uploaded. Open{' '}
-        <a href="/diagnostics">Setup</a> and press Re-authorise.
-      </p>
-    )
-  }
+  const unreachable =
+    delivery.url.includes('127.0.0.1') || delivery.url.includes('localhost')
 
-  if (delivery.failed > 0) {
-    return (
-      <p className="notice notice--warn">
-        {delivery.failed} session{delivery.failed === 1 ? '' : 's'} could not be
-        uploaded{delivery.lastError ? `: ${delivery.lastError}` : '.'} The photos are
-        safe on disk and can be re-published from <a href="/diagnostics">Setup</a>.
-      </p>
-    )
-  }
+  if (!unreachable) return null
 
-  return null
+  return (
+    <p className="notice notice--warn">
+      The guest link points at this machine only ({delivery.url}) — no phone can
+      reach it. Check the booth is on a network, then set the address in{' '}
+      <a href="/diagnostics">Setup</a>.
+    </p>
+  )
 }
 
 /** Where this guest's photos got to, as extra rows on the strip facts. */
@@ -202,11 +195,11 @@ function Delivery({
   const mine =
     delivery && delivery.sessionFolder === snapshot.sessionFolder ? delivery : null
 
-  if (!mine?.enabled) {
+  if (!mine) {
     return (
       <>
         <dt>Delivery</dt>
-        <dd className="muted">Off — the photos stay on this machine.</dd>
+        <dd className="muted">Not published yet.</dd>
       </>
     )
   }
@@ -215,13 +208,7 @@ function Delivery({
     <>
       <dt>Guest link</dt>
       <dd>
-        {mine.url ? (
-          <a href={mine.url} target="_blank" rel="noreferrer">{mine.url}</a>
-        ) : mine.state === 'Failed' ? (
-          <span className="bad">Failed{mine.error ? ` — ${mine.error}` : ''}</span>
-        ) : (
-          <span className="muted">Uploading…</span>
-        )}
+        <a href={mine.url} target="_blank" rel="noreferrer">{mine.url}</a>
       </dd>
     </>
   )
