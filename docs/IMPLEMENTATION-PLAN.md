@@ -25,9 +25,9 @@ The camera path does not change: EOS Utility owns the USB cable and drops JPEGs 
 | In scope extras | Animated GIF, UI polish pass |
 | Deferred | Operator live mirror, cloud delivery |
 
-### Assumptions (correct me if wrong)
+### Decisions taken during M1
 
-- Code lives in `C:\Users\edwar\repos\self-photobooth-plan` and is pushed to a **new** GitHub repo (proposed name `self-photobooth`). The old repo is left untouched.
+- Lives in a **new** public repo, `blueboxdev01/photobooth-app-v2`. The original repo is left untouched.
 - Fresh `git init` rather than a GitHub fork, so history starts clean.
 - "Ignore cloud delivery hooks" means **delete** the Drive implementation, but keep a one-method publisher seam so cloud can return later without restructuring.
 
