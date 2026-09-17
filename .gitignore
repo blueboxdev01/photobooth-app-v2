@@ -17,6 +17,11 @@ src/Photobooth.Server/wwwroot/
 # Never commit anything under here.
 data/
 
+# The booth's own certificate and its private key, generated on first run.
+# Never committed: a shared key is no key at all.
+certs/
+*.pfx
+
 # Local configuration and secrets. Only appsettings.example.json is tracked.
 appsettings.Local.json
 appsettings.*.Local.json

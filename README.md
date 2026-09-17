@@ -22,19 +22,21 @@ See [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md) for the full plan
 |---|---|
 | M1 Repo bring-up, Drive removed, local delivery | done |
 | M2 HTTPS, hostname and the network layer | done — [docs/NETWORK-SETUP.md](docs/NETWORK-SETUP.md) |
-| **M3 The iPad guest screen** | **done — [docs/IPAD-SETUP.md](docs/IPAD-SETUP.md)** |
-| M4 Frame-guide calibration | |
-| M5 Shutter automation | |
-| M6 Sizes, per-session nudge, GIF | |
-| M7 Local delivery page | |
+| M3 The iPad guest screen | done — [docs/IPAD-SETUP.md](docs/IPAD-SETUP.md) |
+| M6 Sizes, per-session nudge, GIF | done |
+| **M7 Local delivery page** | **done — this is the test build** |
+| M4 Frame-guide calibration | next — needs the camera and iPad in one room |
+| M5 Shutter automation | needs the camera |
 | M8 UI polish | |
 
 Inherited and still working: watch-folder ingest, the session engine, the
 compositor and golden-image tests, per-shot retake, drag reordering, the frame
 and slot editor, and the operator console.
 
-164 tests passing — 157 .NET, 7 frontend. Nothing has yet been verified against
+254 tests passing — 247 .NET, 7 frontend. Nothing has yet been verified against
 a real camera, and the guest screen has not yet run on an actual iPad.
+
+**Testing it on hardware: [docs/TEST-BUILD.md](docs/TEST-BUILD.md).**
 
 Each session writes `data/sessions/<name>/` holding the strip, the raw photos,
 and a `session.json` describing them. That folder is both the archive and what

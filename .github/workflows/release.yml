@@ -98,7 +98,7 @@ jobs:
             foreach ($i in 1..40) {
               Start-Sleep -Milliseconds 500
               try {
-                Invoke-RestMethod http://localhost:5000/api/state -TimeoutSec 2 | Out-Null
+                Invoke-RestMethod http://localhost:8080/api/state -TimeoutSec 2 | Out-Null
                 $ready = $true; break
               } catch { }
             }
@@ -106,12 +106,12 @@ jobs:
 
             # The real check: a mock press must actually produce a photo.
             $press = Invoke-RestMethod -Method Post `
-                       'http://localhost:5000/api/mock/press?mode=Normal'
+                       'http://localhost:8080/api/mock/press?mode=Normal'
             if (-not $press.file) { throw "mock press produced no file" }
             Write-Host "mock press wrote $($press.file)"
 
             Start-Sleep -Seconds 3
-            $diag = Invoke-RestMethod http://localhost:5000/api/diagnostics
+            $diag = Invoke-RestMethod http://localhost:8080/api/diagnostics
             $accepted = @($diag.ingest | Where-Object { $_.outcome -eq 'Accepted' })
             if ($accepted.Count -eq 0) { throw "the photo was never ingested" }
             Write-Host "ingested OK: $($accepted[0].fileName)"
@@ -124,8 +124,8 @@ jobs:
             }
             Write-Host "template loaded from $($diag.assumptions.templateSource)"
 
-            foreach ($page in '/operator', '/display', '/diagnostics') {
-              $r = Invoke-WebRequest "http://localhost:5000$page" -TimeoutSec 5
+            foreach ($page in '/operator', '/guest', '/diagnostics', '/templates', '/setup') {
+              $r = Invoke-WebRequest "http://localhost:8080$page" -TimeoutSec 5
               if ($r.StatusCode -ne 200) { throw "$page returned $($r.StatusCode)" }
             }
             Write-Host "all pages served"
@@ -137,6 +137,13 @@ jobs:
             # Shipping that inside the release would put a test image -- and a
             # precedent for shipping a data folder -- into every download.
             Remove-Item (Join-Path $publish 'data') -Recurse -Force -ErrorAction SilentlyContinue
+
+            # And certs/, which matters more: starting the app generates a
+            # certificate and its private key. Shipping those would give every
+            # download the same key, published on a releases page -- so anyone
+            # could impersonate any booth. Each booth must generate its own on
+            # first run, which is exactly what happens when this folder is absent.
+            Remove-Item (Join-Path $publish 'certs') -Recurse -Force -ErrorAction SilentlyContinue
           }
 
       - name: Package
@@ -147,8 +154,16 @@ jobs:
           # The tester gets the sheets they work from. Sending someone a build and
           # then telling them to go and find the setup docs on GitHub is a bad
           # handover.
+          Copy-Item docs/TEST-BUILD.md artifacts/publish/ -ErrorAction SilentlyContinue
+          Copy-Item docs/IPAD-SETUP.md artifacts/publish/ -ErrorAction SilentlyContinue
+          Copy-Item docs/NETWORK-SETUP.md artifacts/publish/ -ErrorAction SilentlyContinue
           Copy-Item docs/FIELD-TEST.md artifacts/publish/ -ErrorAction SilentlyContinue
           Copy-Item docs/QA-CHECKLIST.md artifacts/publish/ -ErrorAction SilentlyContinue
+          # Refuse to ship a private key, whatever produced it. A leaked booth
+          # key on a public releases page cannot be taken back once downloaded.
+          $keys = Get-ChildItem artifacts/publish -Recurse -File -Include *.pfx,*.p12,*.key
+          if ($keys) { throw "refusing to package private keys: $($keys.Name -join ', ')" }
+
           Compress-Archive -Path artifacts/publish/* -DestinationPath "artifacts/$name.zip"
           echo "ASSET=artifacts/$name.zip" >> $env:GITHUB_ENV
 
