@@ -11,15 +11,34 @@ proportions rather than a promise about what is in shot.
 
 ---
 
-## Before you start
+## 1. Trust the booth
 
-Do [docs/NETWORK-SETUP.md](NETWORK-SETUP.md) first. The guest page cannot use the
-camera at all without HTTPS on a trusted certificate — Safari simply refuses, and
-the failure looks like a broken app rather than a missing certificate.
+The guest page cannot use the camera at all until the iPad trusts the booth's
+certificate. Safari simply refuses, and the failure looks like a broken app
+rather than a missing certificate.
+
+The booth makes its own certificate on first run and hands it out over plain
+HTTP, so there is nothing to install on the laptop and no file to transfer. On
+the iPad, open:
+
+```
+http://<the booth's address>:8080/setup
+```
+
+The operator's Setup page shows that address, and the booth prints it on startup.
+Follow the four steps on the page.
+
+**Step three is the one everybody skips**: installing the profile is not the same
+as trusting it. You must also go to **Settings → General → About → Certificate
+Trust Settings** and switch the booth authority on. Without that the profile is
+installed, looks correct, and Safari still refuses.
+
+> If the booth has a real certificate from a domain you own, none of this is
+> needed — see [NETWORK-SETUP.md](NETWORK-SETUP.md).
 
 ---
 
-## 1. Open the guest page
+## 2. Open the guest page
 
 On the iPad, in Safari:
 
@@ -34,12 +53,12 @@ prompt starts over — and the certificate will not match it anyway.
 Allow camera access when asked. You should see yourself, mirrored, with a framing
 guide.
 
-## 2. Add it to the home screen
+## 3. Add it to the home screen
 
 Share → **Add to Home Screen**. Launched from there it opens without Safari's
 address bar and tab bar, which is roughly 15% of the screen back.
 
-## 3. Lock guests into it
+## 4. Lock guests into it
 
 **Settings → Accessibility → Guided Access → On**, and set a passcode.
 
@@ -50,7 +69,7 @@ again and enter the passcode to leave.
 Without this, a guest will eventually swipe out of the booth and into your photos
 app.
 
-## 4. Settings worth changing
+## 5. Settings worth changing
 
 | Setting | Why |
 |---|---|
@@ -59,7 +78,7 @@ app.
 | **Do Not Disturb → on** | A notification banner lands across the guest's face during a countdown |
 | **Rotation lock → on** | In whichever orientation the stand holds it |
 
-## 5. Mounting it
+## 6. Mounting it
 
 Put the iPad **directly under the lens**, as close to it as the stand allows.
 
@@ -91,7 +110,7 @@ takes, which is felt immediately when there is a queue.
 
 | Symptom | Cause |
 |---|---|
-| Certificate warning | Reaching the booth by IP instead of hostname, or the Certificate Trust Settings toggle was never turned on — see [NETWORK-SETUP.md](NETWORK-SETUP.md) |
+| Certificate warning | Reaching the booth by IP instead of hostname, or the Certificate Trust Settings toggle was never turned on — step 1 above |
 | "The camera is busy" | Another tab has it. `/diagnostics` opens the camera too, to read device labels |
 | Camera permission never prompts | Not a secure origin. Check the address really is `https://` and the certificate loaded — Setup on the laptop says |
 | Shows the room behind the booth | The rear camera was granted. Close the tab, reopen, and choose the front camera |

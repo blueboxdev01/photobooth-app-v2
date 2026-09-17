@@ -32,6 +32,13 @@ builder.Services.Configure<NetworkOptions>(
 var network = builder.Configuration.GetSection(NetworkOptions.SectionName)
     .Get<NetworkOptions>() ?? new NetworkOptions();
 
+// Made on first run if there is not one, so the booth can be set up without any
+// certificate tooling on the machine. Uses the bootstrap logger because Serilog
+// proper is not configured until further down.
+BoothCertificate.EnsureExists(
+    network,
+    LoggerFactory.Create(b => b.AddSimpleConsole()).CreateLogger("certificate"));
+
 var certificate = BoothCertificate.Load(network, out var certificateStatus);
 
 builder.WebHost.ConfigureKestrel(kestrel =>
@@ -405,6 +412,10 @@ app.MapGet("/api/photos/{fileName}", (string fileName, WatchFolderCamera camera)
 // The guest's page, on the plain-HTTP listener their phone can reach. Mapped
 // before the SPA fallback so /s/... is a real page rather than the React shell.
 app.MapDeliveryPage();
+
+// How the iPad comes to trust this booth in the first place. On the plain-HTTP
+// port on purpose -- it exists because HTTPS does not work yet.
+app.MapSetupPage();
 
 app.MapFallbackToFile("index.html");
 

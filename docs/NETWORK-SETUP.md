@@ -32,7 +32,20 @@ permission per origin. Visit `https://192.168.8.2:8443` once and it is a
 different origin from `https://booth.local:8443` — the permission prompt starts
 over, and the certificate will not match the address anyway.
 
-### Option A — mkcert, no domain, free
+### Option A — let the booth make its own (default, nothing to install)
+
+On first run, if there is no certificate at `Network:CertificatePath`, the booth
+creates its own authority and a certificate for `Network:Hostname`, and hands the
+authority out at `http://<booth>:8080/booth-ca.crt`.
+
+The iPad installs it from `http://<booth>:8080/setup` — four steps, no laptop
+tooling, no file transfer. See [IPAD-SETUP.md](IPAD-SETUP.md).
+
+This is exactly what mkcert would give you: a private authority that has to be
+trusted by hand on each device. It is regenerated only when the file is missing,
+so deleting `certs/` means trusting it again on every device.
+
+### Option B — mkcert, no domain, free
 
 Good enough for everything up to and including a paid event. One five-minute
 setup on the iPad, then never again.
@@ -70,7 +83,7 @@ mkcert's default validity is longer than it. Re-issue with the command above whe
 it lapses — the iPad keeps trusting the CA, so there is nothing to reinstall
 there.
 
-### Option B — a real domain, ~$10/yr
+### Option C — a real domain, ~$10/yr
 
 Removes the profile install entirely, which is worth it if you will ever have
 more than one guest device, or hand the booth to someone else to run.
