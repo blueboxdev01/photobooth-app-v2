@@ -1,6 +1,6 @@
 import { photoUrl } from './types'
 import type { DeliveryUpdate, SessionSnapshot, SessionState } from './types'
-import { useCountdown, useSession } from './useSession'
+import { useCountdown, usePeek, useSession, useWakeLock } from './useSession'
 import { PosingMirror } from './PosingMirror'
 import { backdropStyle, useDisplayTheme } from './useDisplayTheme'
 
@@ -13,10 +13,19 @@ import { backdropStyle, useDisplayTheme } from './useDisplayTheme'
  */
 const MIRROR_STATES: SessionState[] = ['Idle', 'Countdown', 'Collecting', 'TimedOut']
 
-/** The guest-facing screen. Fullscreen on the external monitor. */
+/**
+ * The guest-facing screen, run fullscreen on the booth's iPad.
+ *
+ * Served at both `/guest` and `/display`. One screen rather than two: the iPad
+ * is the guest monitor now, and a second near-identical guest view would drift
+ * from this one the first time either was touched.
+ */
 export function Display() {
   const { snapshot, delivery, slotAspect } = useSession()
   const backdrop = backdropStyle(useDisplayTheme())
+  const peek = usePeek(snapshot)
+
+  useWakeLock()
 
   if (!snapshot) {
     return (
@@ -73,7 +82,20 @@ export function Display() {
       */}
       <div className="stage__mirror">
         <PosingMirror slotAspect={slotAspect} />
-        <Overlay snapshot={snapshot} />
+
+        {/*
+          The shot just taken, laid over the mirror rather than replacing it.
+          Covering the mirror keeps the camera open underneath, so returning to
+          it is instant -- unmounting would black the preview for a second every
+          single pose, which is the whole session.
+        */}
+        {peek ? (
+          <div className="peek">
+            <img src={photoUrl(peek)} alt="The photo just taken" />
+          </div>
+        ) : (
+          <Overlay snapshot={snapshot} />
+        )}
       </div>
       <Caption snapshot={snapshot} />
       <Filmstrip snapshot={snapshot} />

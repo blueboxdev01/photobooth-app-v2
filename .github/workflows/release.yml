@@ -38,6 +38,7 @@ jobs:
         run: |
           npm ci
           npm run build
+          npm test
 
       - name: Test
         run: dotnet test --configuration Release --logger "console;verbosity=minimal"

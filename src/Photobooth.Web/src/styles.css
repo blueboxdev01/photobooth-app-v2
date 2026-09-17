@@ -574,6 +574,30 @@ a.button, .btn.button {
   /* Guests expect a mirror; an unmirrored feed feels subtly wrong. */
   transform: scaleX(-1);
 }
+/* The shot just taken, held over the mirror for a beat.
+
+   Not mirrored, unlike the video beneath it: this is the photograph as it will
+   appear on the strip, and flipping it would show the guest something that does
+   not exist. The difference is the point -- it is the moment they find out what
+   was actually captured. */
+.peek {
+  position: absolute; inset: 0; z-index: 2;
+  background: #0d0f12;
+  animation: peek-in 180ms ease-out;
+}
+.peek img { width: 100%; height: 100%; object-fit: cover; }
+
+@keyframes peek-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* A guest who has asked for less motion still needs to see the photo; it is the
+   fade that goes, not the peek. */
+@media (prefers-reduced-motion: reduce) {
+  .peek { animation: none; }
+}
+
 .mirror--error {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px; padding: 24px 32px; text-align: center; border: 1px dashed #2a2e35;

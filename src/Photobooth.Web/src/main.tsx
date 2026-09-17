@@ -12,11 +12,16 @@ import { Operator } from './Operator'
 import { Templates } from './Templates'
 import './styles.css'
 
-// Two windows, one bundle. No router: there are exactly two screens and they are
-// opened directly as separate browser windows, so the path is enough.
+// A handful of screens, one bundle. No router: each is opened directly as its
+// own browser window or tab, so the path is enough.
+//
+// /guest and /display are the same screen under two names. /guest is what the
+// iPad is set up with and what the docs say; /display is kept because it is
+// written on things and in older notes, and a dead URL on the guest-facing
+// device is a bad way to find that out.
 const path = window.location.pathname.replace(/\/+$/, '')
 const view =
-  path === '/display' ? <Display />
+  path === '/guest' || path === '/display' ? <Display />
   : path === '/diagnostics' ? <Diagnostics />
   : path === '/templates' ? <Templates />
   : <Operator />

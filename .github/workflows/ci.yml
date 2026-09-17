@@ -40,6 +40,10 @@ jobs:
           npm ci
           npm run build
 
+      - name: Test the frontend
+        working-directory: src/Photobooth.Web
+        run: npm test
+
       - name: Build
         run: dotnet build --configuration Release
 

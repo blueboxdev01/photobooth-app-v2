@@ -20,9 +20,9 @@ See [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md) for the full plan
 
 | Milestone | State |
 |---|---|
-| **M1 Repo bring-up, Drive removed, local delivery** | **done** |
-| M2 HTTPS, hostname and the network layer | next |
-| M3 The iPad guest screen | |
+| M1 Repo bring-up, Drive removed, local delivery | done |
+| M2 HTTPS, hostname and the network layer | done — [docs/NETWORK-SETUP.md](docs/NETWORK-SETUP.md) |
+| **M3 The iPad guest screen** | **done — [docs/IPAD-SETUP.md](docs/IPAD-SETUP.md)** |
 | M4 Frame-guide calibration | |
 | M5 Shutter automation | |
 | M6 Sizes, per-session nudge, GIF | |
@@ -33,7 +33,8 @@ Inherited and still working: watch-folder ingest, the session engine, the
 compositor and golden-image tests, per-shot retake, drag reordering, the frame
 and slot editor, and the operator console.
 
-146 tests passing. Nothing has yet been verified against a real camera.
+164 tests passing — 157 .NET, 7 frontend. Nothing has yet been verified against
+a real camera, and the guest screen has not yet run on an actual iPad.
 
 Each session writes `data/sessions/<name>/` holding the strip, the raw photos,
 and a `session.json` describing them. That folder is both the archive and what
@@ -133,15 +134,29 @@ dotnet build
 dotnet src/Photobooth.Server/bin/Debug/net10.0/Photobooth.Server.dll
 ```
 
+> **Smart App Control.** On a Windows machine with Smart App Control in
+> enforcement mode, freshly built unsigned assemblies are blocked from loading
+> and both `dotnet test` and the app itself fail with `0x800711C7`. It has
+> nothing to do with the code. CI runs the full suite on a clean runner on every
+> push, which is the reliable signal; turning Smart App Control off is
+> irreversible without reinstalling Windows.
+
 Then open:
 
 | | |
 |---|---|
-| <http://localhost:5000/operator> | controls — on your laptop |
-| <http://localhost:5000/display> | guest screen — fullscreen on the monitor |
-| <http://localhost:5000/guest> | the iPad guest screen (M3) |
-| <http://localhost:5000/templates> | frame upload and the slot editor |
-| <http://localhost:5000/diagnostics> | booth setup, and what the app is seeing |
+| <http://localhost:8080/operator> | controls — on your laptop |
+| <http://localhost:8080/guest> | the guest screen — fullscreen on the iPad |
+| <http://localhost:8080/templates> | frame upload and the slot editor |
+| <http://localhost:8080/diagnostics> | booth setup, and what the app is seeing |
+
+`/display` is kept as an alias for `/guest`; they are the same screen.
+
+**Two listeners, not one.** `8080` is plain HTTP for guests' phones; `8443` is
+HTTPS for the iPad and the operator. The iPad's camera only works on a secure
+origin, and a guest's phone arriving by raw LAN address cannot be given a
+certificate that covers it — so they get different doors. See
+[docs/NETWORK-SETUP.md](docs/NETWORK-SETUP.md).
 
 With no camera attached, the operator page can simulate the shutter. The mock is
 deliberately adversarial — it writes slowly in chunks and can reproduce a stale

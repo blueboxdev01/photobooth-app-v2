@@ -2,7 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      viewport-fit=cover reaches under the iPad's rounded corners; without it the
+      guest screen is letterboxed by white bars. Zoom is pinned because a guest
+      leaning on the glass otherwise pinch-zooms the booth and cannot undo it.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+
+    <!-- Added to the iPad's home screen, the guest page opens without Safari's
+         chrome. Combine with Guided Access so guests cannot leave it. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Photobooth" />
+    <meta name="theme-color" content="#14161A" />
+
     <title>Photobooth</title>
   </head>
   <body>

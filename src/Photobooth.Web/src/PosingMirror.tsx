@@ -4,9 +4,9 @@ import { selectedWebcamId, setSelectedWebcamId } from './useWebcams'
 /**
  * The guest-facing live preview.
  *
- * This is a **separate webcam**, not the R50. EOS Utility owns the camera's USB
- * live view while tethered, so the app cannot have it; a cheap webcam beside the
- * lens gives guests something to pose against for about $25.
+ * This is a **separate camera**, not the R50. EOS Utility owns the camera's USB
+ * live view while tethered, so the app cannot have it. On the booth's iPad this
+ * is the iPad's own front camera, which costs nothing and adds no latency.
  *
  * Two details that matter more than they look:
  *
@@ -16,8 +16,10 @@ import { selectedWebcamId, setSelectedWebcamId } from './useWebcams'
  *   R50 shoots 3:2 but the strip slots are 4:3, so the sides get cropped away.
  *   Anyone who fills the camera frame loses their shoulders on the strip.
  *
- * The guide is uncalibrated until M6, when the webcam and the R50 are finally in
+ * The guide is uncalibrated until M4, when the iPad and the R50 are finally in
  * the same room and their fields of view can be measured against each other.
+ * Until then it shows the slot's shape but not the R50's true framing, so treat
+ * it as a hint about proportions rather than a promise about what is in shot.
  */
 export function PosingMirror({ slotAspect = 4 / 3 }: { slotAspect?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -122,7 +124,14 @@ export function PosingMirror({ slotAspect = 4 / 3 }: { slotAspect?: number }) {
  * booth with no preview at all.
  */
 async function open(deviceId: string | null): Promise<MediaStream> {
-  const size = { width: 1280, height: 720 }
+  // A soft preference rather than `exact`: on a device with no facing
+  // information it is ignored instead of failing, which is what makes the same
+  // page work on the iPad and on a laptop.
+  //
+  // It matters most on the iPad, where asking for merely "a camera" can be
+  // answered with the *rear* one -- pointed at whatever is behind the booth,
+  // while the guest watches themselves not appear.
+  const size = { width: 1280, height: 720, facingMode: 'user' }
 
   if (!deviceId) {
     return navigator.mediaDevices.getUserMedia({ video: size, audio: false })
@@ -165,7 +174,7 @@ function describe(e: unknown): Problem {
     return {
       headline: 'The camera is busy',
       hints: [
-        'Close any other tab showing /display or /diagnostics — both open the camera.',
+        'Close any other tab showing /guest or /diagnostics — both open the camera.',
         'Quit Zoom, Teams, OBS or the Windows Camera app if any are running.',
         'Unplug and replug a USB webcam, then press Try again.',
       ],
