@@ -56,7 +56,7 @@ Canon R50 ──USB──> EOS Utility ──writes JPEG──> watch folder
 
 ## Milestones
 
-### M1 — Repo bring-up and Drive removal
+### M1 — Repo bring-up and Drive removal — **done**
 
 Copy the working tree of `photobooth-app` into this directory, `git init`, push to the new remote. Then strip cloud:
 
@@ -67,7 +67,7 @@ Copy the working tree of `photobooth-app` into this directory, `git init`, push 
 
 Gate: solution builds, remaining tests green, `Photobooth.Server.exe` runs with the mock press simulator.
 
-### M2 — HTTPS, hostname, and the network layer
+### M2 — HTTPS, hostname, and the network layer — **done**
 
 **Revised after the Cloudflare question.** A tunnel is the wrong tool for the iPad link — routing the countdown between two devices three feet apart out to Cloudflare's edge makes a venue Wi-Fi hiccup freeze the guest screen. But the *certificate* a tunnel would have given us is worth having on its own, and we can get it without routing any traffic through Cloudflare.
 
@@ -83,15 +83,17 @@ Gate: solution builds, remaining tests green, `Photobooth.Server.exe` runs with 
 
 Gate: iPad loads `/guest` over HTTPS with no warning and no profile installed, and is granted camera permission; a phone on the same network loads `/s/{token}` over HTTP.
 
-### M3 — The iPad guest screen
+### M3 — The iPad guest screen — **done**
 
-`PosingMirror.tsx` already does the hard part — mirrored preview, slot-aspect guide box, device selection, error recovery — and its own comments flag the guide as uncalibrated. Reuse it rather than rewriting.
+**Corrected during implementation.** The plan called for a new `/guest` route. That was wrong: `Display.tsx` already implemented the entire guest flow, so a second guest screen would have been a near-copy that drifted the first time either was touched. `/guest` and `/display` are now two names for one screen.
 
-- New `/guest` route in `AppShell.tsx`, driven entirely by SignalR state. States: **Idle** → **Armed** (3-2-1 countdown) → **Peek** (last capture held ~2s, then back to mirror) → **Review** (strip preview, per-shot retake) → **Delivery** (QR).
-- Point `PosingMirror` at `facingMode: 'user'` and add front-camera mirroring. Peek pulls from the existing `GET /api/photos/{fileName}`.
-- PWA meta for full-screen standalone, plus a screen wake lock. Document Guided Access so guests can't leave the page.
+- `PosingMirror` asks for `facingMode: 'user'` — a soft preference, so the same page still works on a laptop. Mirroring was already in CSS.
+- **Peek**: the shot just taken, held ~2s *over* the mirror rather than replacing it, so the camera stays open underneath. Detects arrival by **file name**, not count or last entry, because a retake replaces a shot in place — both obvious implementations show the wrong pose and look fine until someone retakes a middle shot at an event.
+- Screen wake lock, re-taken on `visibilitychange` because iOS drops it on every backgrounding.
+- Viewport and web-app meta; `docs/IPAD-SETUP.md` covers Guided Access and mounting.
+- Added **vitest**, and covered `usePeek` including the retake case.
 
-Gate: a full mock session runs end to end on the iPad with the simulator driving captures.
+Still to verify on real hardware: the whole screen, on an actual iPad.
 
 ### M4 — Frame-guide calibration
 
@@ -175,6 +177,16 @@ Reuse as-is, do not rewrite: `StripCompositor`, `ArtInspector`, `FileTemplatePro
 5. Full four-shot session: countdown → peek → review → retake one shot → accept.
 6. Scan the QR on a phone that has never joined before; download strip, GIF, and individual photos.
 7. Repeat on all three network modes (router, laptop hotspot, venue Wi-Fi) changing only the base URL.
+
+---
+
+## Environment constraint found during M2
+
+**Smart App Control is in enforcement mode on the development laptop** and blocks the project's freshly built unsigned assemblies from loading (`0x800711C7`). It spread from `Photobooth.Imaging.dll` to `Photobooth.Server.dll` to `Photobooth.Delivery.dll`, in Debug and Release, and stops the app starting at all.
+
+Disabling it is irreversible without reinstalling Windows, so the decision was to leave it on and verify through CI. `.github/workflows/ci.yml` runs the full suite on every push. A red local suite is not evidence of anything until the error has been checked.
+
+The cost lands on anything needing the app actually running — which from here means the guest screen, the calibration flow and the shutter trigger all need hands-on checking on the booth hardware rather than at a desk.
 
 ---
 
